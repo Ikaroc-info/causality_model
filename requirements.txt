@@ -1,6 +1,7 @@
 fastapi
 uvicorn
-dowhy
+dowhy==0.10.1
+networkx==2.8.8
 pandas
 scikit-learn
 python-multipart
