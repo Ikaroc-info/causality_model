@@ -2,6 +2,8 @@ fastapi
 uvicorn
 dowhy==0.10.1
 networkx==2.8.8
-pandas
+pandas==1.5.3
+numpy==1.23.5
+statsmodels==0.13.5
 scikit-learn
 python-multipart
