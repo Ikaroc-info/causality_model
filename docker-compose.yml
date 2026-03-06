@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  causality-app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./data_generator.py:/app/data_generator.py:ro
+      - ./test_data:/app/test_data:ro
+    restart: unless-stopped

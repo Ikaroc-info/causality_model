@@ -29,17 +29,19 @@ _DIST_DIR = os.path.join(_BASE_DIR, 'dist')
 app = FastAPI()
 
 # ── Auto-open browser once the server is ready ────────────────────────────────
-HOST = '127.0.0.1'
-PORT = 8000
+HOST = os.getenv('HOST', '127.0.0.1')
+PORT = int(os.getenv('PORT', 8000))
 
 @app.on_event('startup')
 async def open_browser():
-    url = f'http://{HOST}:{PORT}'
-    def _open():
-        import time
-        time.sleep(0.8)  # tiny delay so uvicorn is fully listening
-        webbrowser.open(url)
-    threading.Thread(target=_open, daemon=True).start()
+    # Only open browser if not running in Docker
+    if os.getenv('HOST') != '0.0.0.0':
+        url = f'http://{HOST}:{PORT}'
+        def _open():
+            import time
+            time.sleep(0.8)  # tiny delay so uvicorn is fully listening
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
 
 # NOTE: Static file mounts are registered at the BOTTOM of this file,
 # after all API routes, so that POST /analyze is not shadowed by the

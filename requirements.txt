@@ -1,9 +1,9 @@
 fastapi
 uvicorn
-dowhy==0.10.1
-networkx==2.8.8
-pandas==1.5.3
-numpy==1.23.5
-statsmodels==0.13.5
+dowhy==0.12
+networkx<3.0
+pandas<2.0
+numpy<2.0
+statsmodels
 scikit-learn
 python-multipart
