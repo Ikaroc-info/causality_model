@@ -28,30 +28,55 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # --- Paths (absolute) ---
-# $pythonDir is set directly as absolute path - no Join-Path with PSScriptRoot
-# to avoid the bug where Join-Path(absolute, absolute) = PSScriptRoot + absolute.
+# Default target dir for a fresh install.
 $pythonDir  = "$env:LOCALAPPDATA\Programs\CausalityModelPython"
 $pythonExe  = "$pythonDir\python.exe"
 $venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
 $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
 
-# --- Step 1: Download and install Python 3.11 locally ---
+# --- Step 1: Find or install Python 3.11 ---
 Write-Host "[1/4] Preparing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
-# Guard: the Windows Store Python stub (WindowsApps\python.exe) is NOT a real
-# Python - it just opens the Store. Treat it as absent.
-$isStoreStub = $pythonExe -like "*WindowsApps*"
-
-if ((Test-Path $pythonExe) -and (-not $isStoreStub)) {
-    $ver = & $pythonExe --version 2>&1
-    Write-Host "  Already installed: $ver" -ForegroundColor Green
-} else {
-    if ($isStoreStub) {
-        Write-Host "  [INFO] Windows Store Python stub detected - installing real Python." -ForegroundColor Yellow
+# 1a. Check the Windows registry: the Python installer always registers itself
+#     under HKCU:\Software\Python\PythonCore\<version>\InstallPath.
+#     This is the most reliable way to find a previous user-install.
+$regBase = "HKCU:\Software\Python\PythonCore"
+foreach ($ver in @("3.11", "3.11.9")) {
+    $regKey = "$regBase\$ver\InstallPath"
+    if (Test-Path $regKey) {
+        $regDir = (Get-ItemProperty $regKey -ErrorAction SilentlyContinue).'(default)'
+        if ($regDir) {
+            $candidate = "$($regDir.TrimEnd('\'))\python.exe"
+            if ((Test-Path $candidate) -and ($candidate -notlike "*WindowsApps*")) {
+                $pythonDir = $regDir.TrimEnd('\')
+                $pythonExe = $candidate
+                Write-Host "  Found via registry: $pythonExe" -ForegroundColor Green
+            }
+        }
     }
+}
+
+# 1b. Check our own install dir (in case registry was cleared but files remain).
+if (-not ((Test-Path $pythonExe) -and ($pythonExe -notlike "*WindowsApps*"))) {
+    $ownExe = "$env:LOCALAPPDATA\Programs\CausalityModelPython\python.exe"
+    if (Test-Path $ownExe) {
+        $pythonDir = "$env:LOCALAPPDATA\Programs\CausalityModelPython"
+        $pythonExe = $ownExe
+        Write-Host "  Found local install: $pythonExe" -ForegroundColor Green
+    }
+}
+
+$pythonFound = (Test-Path $pythonExe) -and ($pythonExe -notlike "*WindowsApps*")
+
+if ($pythonFound) {
+    $ver = & $pythonExe --version 2>&1
+    Write-Host "  Using: $pythonExe ($ver)" -ForegroundColor Green
+} else {
+    Write-Host "  Python 3.11 not found - downloading installer..." -ForegroundColor Yellow
     # -- Diagnostics --
     Write-Host "  [DEBUG] PSScriptRoot  : $PSScriptRoot" -ForegroundColor Gray
     Write-Host "  [DEBUG] pythonDir     : $pythonDir" -ForegroundColor Gray
+
     Write-Host "  [DEBUG] pythonExe     : $pythonExe" -ForegroundColor Gray
 
     Write-Host "  Downloading Python $PYTHON_VERSION from python.org..." -ForegroundColor Yellow
