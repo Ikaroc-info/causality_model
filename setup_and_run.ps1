@@ -11,9 +11,6 @@
 
 # --- Configuration ---
 $PYTHON_VERSION    = "3.11.9"
-# Install into LOCALAPPDATA\Programs to avoid dot-path and relative-path issues
-# with the MSI installer engine, and to avoid Windows Defender false positives.
-$PYTHON_DIR        = Join-Path $env:LOCALAPPDATA "Programs\CausalityModelPython"
 $VENV_DIR          = ".venv"
 $REQUIREMENTS_FILE = "requirements.txt"
 $APP_FILE          = "app.py"
@@ -31,18 +28,27 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # --- Paths (absolute) ---
-$pythonDir  = Join-Path $PSScriptRoot $PYTHON_DIR
-$pythonExe  = Join-Path $pythonDir "python.exe"
-$venvPython = Join-Path $PSScriptRoot "$VENV_DIR\Scripts\python.exe"
-$venvPip    = Join-Path $PSScriptRoot "$VENV_DIR\Scripts\pip.exe"
+# $pythonDir is set directly as absolute path — no Join-Path with PSScriptRoot
+# to avoid the bug where Join-Path(absolute, absolute) = PSScriptRoot + absolute.
+$pythonDir  = "$env:LOCALAPPDATA\Programs\CausalityModelPython"
+$pythonExe  = "$pythonDir\python.exe"
+$venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
+$venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
 
 # --- Step 1: Download and install Python 3.11 locally ---
 Write-Host "[1/4] Preparing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
-if (Test-Path $pythonExe) {
+# Guard: the Windows Store Python stub (WindowsApps\python.exe) is NOT a real
+# Python — it just opens the Store. Treat it as absent.
+$isStoreStub = $pythonExe -like "*WindowsApps*"
+
+if ((Test-Path $pythonExe) -and (-not $isStoreStub)) {
     $ver = & $pythonExe --version 2>&1
     Write-Host "  Already installed: $ver" -ForegroundColor Green
 } else {
+    if ($isStoreStub) {
+        Write-Host "  [INFO] Windows Store Python stub detected — installing real Python." -ForegroundColor Yellow
+    }
     # -- Diagnostics --
     Write-Host "  [DEBUG] PSScriptRoot  : $PSScriptRoot" -ForegroundColor Gray
     Write-Host "  [DEBUG] pythonDir     : $pythonDir" -ForegroundColor Gray
