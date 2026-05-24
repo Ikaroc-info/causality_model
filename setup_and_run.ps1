@@ -28,7 +28,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # --- Paths (absolute) ---
-# $pythonDir is set directly as absolute path — no Join-Path with PSScriptRoot
+# $pythonDir is set directly as absolute path - no Join-Path with PSScriptRoot
 # to avoid the bug where Join-Path(absolute, absolute) = PSScriptRoot + absolute.
 $pythonDir  = "$env:LOCALAPPDATA\Programs\CausalityModelPython"
 $pythonExe  = "$pythonDir\python.exe"
@@ -39,7 +39,7 @@ $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
 Write-Host "[1/4] Preparing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
 # Guard: the Windows Store Python stub (WindowsApps\python.exe) is NOT a real
-# Python — it just opens the Store. Treat it as absent.
+# Python - it just opens the Store. Treat it as absent.
 $isStoreStub = $pythonExe -like "*WindowsApps*"
 
 if ((Test-Path $pythonExe) -and (-not $isStoreStub)) {
@@ -47,7 +47,7 @@ if ((Test-Path $pythonExe) -and (-not $isStoreStub)) {
     Write-Host "  Already installed: $ver" -ForegroundColor Green
 } else {
     if ($isStoreStub) {
-        Write-Host "  [INFO] Windows Store Python stub detected — installing real Python." -ForegroundColor Yellow
+        Write-Host "  [INFO] Windows Store Python stub detected - installing real Python." -ForegroundColor Yellow
     }
     # -- Diagnostics --
     Write-Host "  [DEBUG] PSScriptRoot  : $PSScriptRoot" -ForegroundColor Gray
