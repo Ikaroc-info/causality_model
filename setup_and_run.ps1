@@ -96,45 +96,20 @@ if ($pythonFound) {
         exit 1
     }
 
-    # Snapshot existing msiexec PIDs before starting the installer
-    # so we can identify the new one it spawns.
-    $existingMsiPids = (Get-Process -Name "msiexec" -ErrorAction SilentlyContinue).Id
-
-    Write-Host "  [DEBUG] TargetDir     : $pythonDir" -ForegroundColor Gray
-    Write-Host "  Installing Python $PYTHON_VERSION..." -ForegroundColor Yellow
-
     $targetDirArg = 'TargetDir="' + $pythonDir + '"'
-    $installArgs  = @("/quiet", "InstallAllUsers=0", "PrependPath=0",
+    $installArgs  = @("InstallAllUsers=0", "PrependPath=0",
                       "Include_test=0", "Include_launcher=0", "Include_doc=0",
                       $targetDirArg)
 
-    # Run bootstrapper (exits almost immediately - it just launches msiexec)
-    $process  = Start-Process -FilePath $installerPath -ArgumentList $installArgs -PassThru
-    Write-Host "  Bootstrapper started (PID $($process.Id)). Waiting for msiexec..." -ForegroundColor Gray
+    Write-Host "  [DEBUG] TargetDir : $pythonDir" -ForegroundColor Gray
+    Write-Host "  Launching Python installer with full UI..." -ForegroundColor Yellow
+    Write-Host "  -> Please follow the installer steps." -ForegroundColor Cyan
+    Write-Host "  -> Install to: $pythonDir" -ForegroundColor Cyan
+    Write-Host "  -> When done, close the installer to continue." -ForegroundColor Cyan
 
-    # Give the bootstrapper ~3 s to spawn msiexec
-    Start-Sleep -Seconds 3
-
-    # Find the new msiexec process(es) the bootstrapper launched
-    $newMsi = Get-Process -Name "msiexec" -ErrorAction SilentlyContinue |
-              Where-Object { $existingMsiPids -notcontains $_.Id }
-
-    if ($newMsi) {
-        foreach ($msiProc in $newMsi) {
-            Write-Host "  Waiting for msiexec (PID $($msiProc.Id)) to complete..." -ForegroundColor Gray
-            $msiProc.WaitForExit(300000)   # up to 5 min
-            Write-Host "  msiexec exited with code: $($msiProc.ExitCode)" -ForegroundColor Gray
-        }
-    } else {
-        Write-Host "  No new msiexec found - installer may have exited without running MSI." -ForegroundColor Yellow
-        # Fallback: wait a bit and check anyway
-        Start-Sleep -Seconds 5
-    }
-
-    # Wait for bootstrapper to finish as well
-    $process.WaitForExit(30000) | Out-Null
+    $process  = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
     $exitCode = $process.ExitCode
-    Write-Host "  [DEBUG] Bootstrapper exit code: $exitCode" -ForegroundColor Gray
+    Write-Host "  Installer exit code: $exitCode" -ForegroundColor Gray
 
     Remove-Item $installerPath -ErrorAction SilentlyContinue
 
