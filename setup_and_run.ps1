@@ -3,23 +3,21 @@
     Setup and run the Causality Model application.
 .DESCRIPTION
     This script:
-    1. Downloads Python 3.11 via NuGet (full stdlib: tkinter, venv, etc.) - no admin required
+    1. Downloads Python 3.11 from python.org and installs it locally (no admin required)
     2. Creates a virtual environment (.venv)
     3. Installs requirements from requirements.txt
     4. Launches app.py
 #>
 
 # --- Configuration ---
-$PYTHON_VERSION = "3.11.9"
-$PYTHON_DIR     = ".python"
-$VENV_DIR       = ".venv"
+$PYTHON_VERSION    = "3.11.9"
+$PYTHON_DIR        = ".python"
+$VENV_DIR          = ".venv"
 $REQUIREMENTS_FILE = "requirements.txt"
 $APP_FILE          = "app.py"
 
-# NuGet Python package: full stdlib (tkinter included), no installer, no UAC
-# The .nupkg is simply a renamed zip archive
-$NUGET_PKG_VERSION = "3.11.9"
-$NUGET_URL = "https://globalcdn.nuget.org/packages/python.$NUGET_PKG_VERSION.nupkg"
+$INSTALLER_NAME = "python-$PYTHON_VERSION-amd64.exe"
+$PYTHON_URL     = "https://www.python.org/ftp/python/$PYTHON_VERSION/$INSTALLER_NAME"
 
 # --- Move to script directory ---
 Set-Location -Path $PSScriptRoot
@@ -30,63 +28,71 @@ Write-Host "  Causality Model - Setup & Launch"      -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Paths ---
+# --- Paths (absolute) ---
 $pythonDir  = Join-Path $PSScriptRoot $PYTHON_DIR
-$pythonExe  = Join-Path $pythonDir "tools\python.exe"
-$venvDir    = Join-Path $PSScriptRoot $VENV_DIR
-$venvPython = Join-Path $venvDir "Scripts\python.exe"
-$venvPip    = Join-Path $venvDir "Scripts\pip.exe"
+$pythonExe  = Join-Path $pythonDir "python.exe"
+$venvPython = Join-Path $PSScriptRoot "$VENV_DIR\Scripts\python.exe"
+$venvPip    = Join-Path $PSScriptRoot "$VENV_DIR\Scripts\pip.exe"
 
-# --- Step 1: Download Python via NuGet ---
+# --- Step 1: Download and install Python 3.11 locally ---
 Write-Host "[1/4] Preparing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
 if (Test-Path $pythonExe) {
-    $versionOutput = & $pythonExe --version 2>&1
-    Write-Host "  Already installed: $versionOutput" -ForegroundColor Green
+    $ver = & $pythonExe --version 2>&1
+    Write-Host "  Already installed: $ver" -ForegroundColor Green
 } else {
-    Write-Host "  Downloading Python $PYTHON_VERSION from NuGet (full install, includes tkinter)..." -ForegroundColor Yellow
-    Write-Host "  URL: $NUGET_URL" -ForegroundColor Gray
+    Write-Host "  Downloading Python $PYTHON_VERSION from python.org..." -ForegroundColor Yellow
+    Write-Host "  URL: $PYTHON_URL" -ForegroundColor Gray
 
-    $nupkgPath = Join-Path $PSScriptRoot "python.nupkg.zip"
+    $installerPath = Join-Path $PSScriptRoot $INSTALLER_NAME
 
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $NUGET_URL -OutFile $nupkgPath -UseBasicParsing
+        Invoke-WebRequest -Uri $PYTHON_URL -OutFile $installerPath -UseBasicParsing
         Write-Host "  Download complete." -ForegroundColor Green
     } catch {
-        Write-Host "  ERROR: Failed to download Python from NuGet." -ForegroundColor Red
-        Write-Host "  Details: $_" -ForegroundColor Gray
-        Write-Host "  Please check your internet connection and try again." -ForegroundColor Yellow
+        Write-Host "  ERROR: Failed to download Python installer: $_" -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
 
-    # .nupkg is a zip — extract directly
-    Write-Host "  Extracting to '$PYTHON_DIR'..." -ForegroundColor Yellow
-    New-Item -ItemType Directory -Path $pythonDir -Force | Out-Null
-    Expand-Archive -Path $nupkgPath -DestinationPath $pythonDir -Force
-    Remove-Item $nupkgPath -ErrorAction SilentlyContinue
+    # Install silently to local directory — no admin, no PATH modification.
+    # IMPORTANT: TargetDir is quoted to handle paths with spaces.
+    Write-Host "  Installing Python $PYTHON_VERSION into '$PYTHON_DIR'..." -ForegroundColor Yellow
+    Write-Host "  (No admin rights required, no system changes)" -ForegroundColor Gray
+
+    $installArgs = "/quiet InstallAllUsers=0 PrependPath=0 Include_test=0 Include_launcher=0 Include_doc=0 TargetDir=`"$pythonDir`""
+
+    $process = Start-Process -FilePath $installerPath `
+                             -ArgumentList $installArgs `
+                             -Wait -PassThru -NoNewWindow
+
+    Remove-Item $installerPath -ErrorAction SilentlyContinue
+
+    if ($process.ExitCode -ne 0) {
+        Write-Host "  ERROR: Python installation failed (exit code $($process.ExitCode))." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 
     if (-not (Test-Path $pythonExe)) {
-        Write-Host "  ERROR: python.exe not found after extraction." -ForegroundColor Red
-        Write-Host "  Expected: $pythonExe" -ForegroundColor Gray
-        Write-Host "  Contents of $pythonDir :" -ForegroundColor Gray
-        Get-ChildItem $pythonDir | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+        Write-Host "  ERROR: python.exe not found after installation." -ForegroundColor Red
+        Write-Host "  Expected location: $pythonExe" -ForegroundColor Gray
         Read-Host "Press Enter to exit"
         exit 1
     }
 
-    $versionOutput = & $pythonExe --version 2>&1
-    Write-Host "  Ready: $versionOutput" -ForegroundColor Green
+    $ver = & $pythonExe --version 2>&1
+    Write-Host "  Installed: $ver" -ForegroundColor Green
 }
 
 # --- Step 2: Create virtual environment ---
 Write-Host ""
 Write-Host "[2/4] Setting up virtual environment..." -ForegroundColor Yellow
 
-if (-not (Test-Path $venvDir)) {
+if (-not (Test-Path $VENV_DIR)) {
     Write-Host "  Creating virtual environment in '$VENV_DIR'..."
-    & $pythonExe -m venv $venvDir
+    & $pythonExe -m venv $VENV_DIR
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ERROR: Failed to create virtual environment." -ForegroundColor Red
