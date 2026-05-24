@@ -2,27 +2,20 @@
 
 A pure Python desktop application for calculating Causal effects using Microsoft DoWhy, pandas, and customtkinter.
 
-## Prerequisites
+## 🚀 Getting Started (Windows)
 
-Make sure you have Python 3.8+ installed.
+> **No installation required.** Everything is handled automatically.
 
-## Installation
+**Double-cliquez sur `launch.bat`** — c'est tout.
 
-Install the required dependencies via pip:
+Le script s'occupe automatiquement de :
+1. Télécharger et installer Python 3.11 localement (sans droits admin, sans modifier le système)
+2. Créer un environnement virtuel `.venv`
+3. Installer toutes les dépendances depuis `requirements.txt`
+4. Lancer l'application
 
-```bash
-pip install -r requirements.txt
-```
-
-*(Optional but recommended: use a virtual environment `python -m venv venv` before installing requirements)*
-
-## Running the Application
-
-Launch the desktop application with:
-
-```bash
-python app.py
-```
+> ℹ️ La première exécution peut prendre quelques minutes (téléchargement de Python et des dépendances).
+> Les lancements suivants sont quasi-instantanés.
 
 ## Features
 - **CSV Data Loading**: Choose your datasets via standard file dialog.
