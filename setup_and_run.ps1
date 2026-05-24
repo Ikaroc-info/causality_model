@@ -3,7 +3,7 @@
     Setup and run the Causality Model application.
 .DESCRIPTION
     This script:
-    1. Downloads Python 3.11 from python.org and installs it locally
+    1. Downloads Python 3.11 (embeddable package) from python.org
     2. Creates a virtual environment (.venv)
     3. Installs requirements from requirements.txt
     4. Launches app.py
@@ -16,9 +16,10 @@ $VENV_DIR = ".venv"
 $REQUIREMENTS_FILE = "requirements.txt"
 $APP_FILE = "app.py"
 
-# Official Python installer from python.org
-$INSTALLER_NAME = "python-$PYTHON_VERSION-amd64.exe"
-$PYTHON_URL = "https://www.python.org/ftp/python/$PYTHON_VERSION/$INSTALLER_NAME"
+# Embeddable package: no installer, no admin/UAC required, ~10MB
+$EMBED_ZIP_NAME = "python-$PYTHON_VERSION-embed-amd64.zip"
+$EMBED_URL = "https://www.python.org/ftp/python/$PYTHON_VERSION/$EMBED_ZIP_NAME"
+$GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
 # --- Move to script directory ---
 Set-Location -Path $PSScriptRoot
@@ -35,63 +36,66 @@ $pythonExe = Join-Path $pythonDir "python.exe"
 $venvPython = Join-Path $PSScriptRoot "$VENV_DIR\Scripts\python.exe"
 $venvPip = Join-Path $PSScriptRoot "$VENV_DIR\Scripts\pip.exe"
 
-# --- Step 1: Download and install Python 3.11 locally ---
+# --- Step 1: Download embeddable Python 3.11 ---
 Write-Host "[1/4] Preparing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
 if (Test-Path $pythonExe) {
     $versionOutput = & $pythonExe --version 2>&1
     Write-Host "  Already installed: $versionOutput" -ForegroundColor Green
 } else {
-    Write-Host "  Downloading Python $PYTHON_VERSION from python.org..." -ForegroundColor Yellow
-    Write-Host "  URL: $PYTHON_URL" -ForegroundColor Gray
+    # -- 1a. Download the embeddable zip --
+    Write-Host "  Downloading Python $PYTHON_VERSION embeddable package..." -ForegroundColor Yellow
+    Write-Host "  URL: $EMBED_URL" -ForegroundColor Gray
 
-    $installerPath = Join-Path $PSScriptRoot $INSTALLER_NAME
+    $zipPath = Join-Path $PSScriptRoot $EMBED_ZIP_NAME
 
-    # Download the official installer
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $PYTHON_URL -OutFile $installerPath -UseBasicParsing
+        Invoke-WebRequest -Uri $EMBED_URL -OutFile $zipPath -UseBasicParsing
         Write-Host "  Download complete." -ForegroundColor Green
     } catch {
-        Write-Host "  ERROR: Failed to download Python installer." -ForegroundColor Red
+        Write-Host "  ERROR: Failed to download Python embeddable package." -ForegroundColor Red
         Write-Host "  Please check your internet connection and try again." -ForegroundColor Yellow
         Read-Host "Press Enter to exit"
         exit 1
     }
 
-    # Install silently to local directory (no admin, no PATH modification)
-    Write-Host "  Installing Python $PYTHON_VERSION locally into '$PYTHON_DIR'..." -ForegroundColor Yellow
-    Write-Host "  (No admin rights required, no system changes)" -ForegroundColor Gray
-
-    $installArgs = @(
-        "/quiet",
-        "InstallAllUsers=0",
-        "PrependPath=0",
-        "Include_test=0",
-        "Include_launcher=0",
-        "Include_doc=0",
-        "TargetDir=$pythonDir"
-    )
-    $process = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
-
-    # Clean up installer
-    Remove-Item $installerPath -ErrorAction SilentlyContinue
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "  ERROR: Python installation failed (exit code $($process.ExitCode))." -ForegroundColor Red
-        Write-Host "  Try downloading and installing Python $PYTHON_VERSION manually." -ForegroundColor Yellow
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
+    # -- 1b. Extract the zip --
+    Write-Host "  Extracting to '$PYTHON_DIR'..." -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $pythonDir -Force | Out-Null
+    Expand-Archive -Path $zipPath -DestinationPath $pythonDir -Force
+    Remove-Item $zipPath -ErrorAction SilentlyContinue
 
     if (-not (Test-Path $pythonExe)) {
-        Write-Host "  ERROR: Python executable not found after installation at $pythonExe" -ForegroundColor Red
+        Write-Host "  ERROR: python.exe not found after extraction at: $pythonExe" -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
 
+    # -- 1c. Enable site-packages (required so pip and venv work) --
+    $pthFile = Get-ChildItem -Path $pythonDir -Filter "python*._pth" | Select-Object -First 1
+    if ($pthFile) {
+        $pthContent = Get-Content $pthFile.FullName
+        $pthContent = $pthContent -replace "#import site", "import site"
+        Set-Content -Path $pthFile.FullName -Value $pthContent
+        Write-Host "  Enabled site-packages in $($pthFile.Name)" -ForegroundColor Green
+    }
+
+    # -- 1d. Download and install pip --
+    Write-Host "  Installing pip..." -ForegroundColor Yellow
+    $getPipPath = Join-Path $pythonDir "get-pip.py"
+    try {
+        Invoke-WebRequest -Uri $GET_PIP_URL -OutFile $getPipPath -UseBasicParsing
+    } catch {
+        Write-Host "  ERROR: Failed to download get-pip.py." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+    & $pythonExe $getPipPath --quiet
+    Remove-Item $getPipPath -ErrorAction SilentlyContinue
+
     $versionOutput = & $pythonExe --version 2>&1
-    Write-Host "  Installed: $versionOutput" -ForegroundColor Green
+    Write-Host "  Ready: $versionOutput" -ForegroundColor Green
 }
 
 # --- Step 2: Create virtual environment ---
