@@ -79,6 +79,53 @@ if ($pythonFound) {
 
     Write-Host "  [DEBUG] pythonExe     : $pythonExe" -ForegroundColor Gray
 
+    # --- Cleanup broken Python 3.11 MSI registration ---
+    # The installer shows "Modify/Repair/Uninstall" when a previous install is
+    # registered in the MSI database but the files no longer exist.
+    # We must remove those registry entries first so a fresh install can proceed.
+    Write-Host "  Cleaning up broken Python 3.11 installation records..." -ForegroundColor Yellow
+
+    $uninstallRoots = @(
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+
+    $removedAny = $false
+    foreach ($root in $uninstallRoots) {
+        if (-not (Test-Path $root)) { continue }
+        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
+            $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+            if ($props.DisplayName -like "*Python 3.11*") {
+                $guid = $_.PSChildName
+                Write-Host "  Removing: $($props.DisplayName) [$guid]" -ForegroundColor Gray
+                Start-Process "msiexec.exe" -ArgumentList "/x", $guid, "/quiet", "/norestart" -Wait -ErrorAction SilentlyContinue
+                # Also delete the registry key directly in case msiexec fails
+                Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                $removedAny = $true
+            }
+        }
+    }
+
+    # Remove the Python PythonCore registry key (python.org's own registry entry)
+    $pythonCoreKey = "HKCU:\Software\Python\PythonCore"
+    if (Test-Path $pythonCoreKey) {
+        Get-ChildItem $pythonCoreKey -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.PSChildName -like "3.11*") {
+                Write-Host "  Removing PythonCore registry: $($_.PSPath)" -ForegroundColor Gray
+                Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                $removedAny = $true
+            }
+        }
+    }
+
+    if ($removedAny) {
+        Write-Host "  Cleanup done. Proceeding with fresh install." -ForegroundColor Green
+    } else {
+        Write-Host "  No broken registrations found." -ForegroundColor Gray
+    }
+
+    # --- Download and install Python ---
     Write-Host "  Downloading Python $PYTHON_VERSION from python.org..." -ForegroundColor Yellow
     $installerPath = Join-Path $PSScriptRoot $INSTALLER_NAME
 
@@ -95,6 +142,7 @@ if ($pythonFound) {
         Read-Host "Press Enter to exit"
         exit 1
     }
+
 
     $targetDirArg = 'TargetDir="' + $pythonDir + '"'
     $installArgs  = @("InstallAllUsers=0", "PrependPath=0",
