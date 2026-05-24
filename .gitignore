@@ -6,14 +6,30 @@ dist-ssr/
 
 # Build artifacts (PyInstaller)
 build/
+*.spec
 *.spec.bak
 
 # Python environment
 venv/
+.venv/
+.python/
 __pycache__/
 *.pyc
 *.pyo
 
+# Python installer (downloaded by setup_and_run.ps1)
+python-*.exe
+
 # PyInstaller binary output (too large for GitHub)
-*.exe
 *.bin
+
+# Python source builds (downloaded by setup_and_run.sh)
+Python-*.tgz
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Debug / temp logs
+*.log
+debug_*.py
