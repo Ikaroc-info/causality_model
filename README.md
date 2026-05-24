@@ -1,29 +1,35 @@
-# causality_model
+# Causal Experience Manager
 
-## Launch everything with one Python script
+A pure Python desktop application for calculating Causal effects using Microsoft DoWhy, pandas, and customtkinter.
 
-From the project root, run (shortest command):
+## Prerequisites
+
+Make sure you have Python 3.8+ installed.
+
+## Installation
+
+Install the required dependencies via pip:
 
 ```bash
-python run.py
+pip install -r requirements.txt
 ```
 
-Equivalent command:
+*(Optional but recommended: use a virtual environment `python -m venv venv` before installing requirements)*
+
+## Running the Application
+
+Launch the desktop application with:
 
 ```bash
-python launcher.py
+python app.py
 ```
 
-What it does:
-- Creates and uses `./venv` automatically (Linux/Windows)
-- Installs Python dependencies from `requirements.txt`
-- Builds the frontend (`npm install` + `npm run build`) if `dist/` is missing
-- Starts `server.py`
-
-Useful options:
-- `python launcher.py --skip-frontend`
-- `python launcher.py --rebuild-frontend`
-- `python launcher.py --skip-python-deps`
-- `python launcher.py --no-venv`
-
-On Windows, you can still double-click `launcher.bat`, which now delegates to `launcher.py`.
+## Features
+- **CSV Data Loading**: Choose your datasets via standard file dialog.
+- **Variable Selection**: Pick your Treatments (causes), Outcomes (effects), and Confounders (controls).
+- **Backend Model**:
+  - `dowhy` for Causal Inference.
+  - Linear Regression, Propensity Score methods.
+  - Robustness checks via Refuters (Placebo, Random Common Cause).
+- **Diagnostics**:
+  - Standardized Mean Difference (SMD) rendered directly using Matplotlib.
