@@ -71,10 +71,10 @@ if ((Test-Path $pythonExe) -and (-not $isStoreStub)) {
         exit 1
     }
 
-    # Use Start-Process -Wait (more reliable than & for MSI-based installers
-    # that may spawn a child msiexec process).
-    # TargetDir is passed as the last element of an array: PowerShell joins with
-    # spaces, and the inner quotes survive because they are part of the string value.
+    # Snapshot existing msiexec PIDs before starting the installer
+    # so we can identify the new one it spawns.
+    $existingMsiPids = (Get-Process -Name "msiexec" -ErrorAction SilentlyContinue).Id
+
     Write-Host "  [DEBUG] TargetDir     : $pythonDir" -ForegroundColor Gray
     Write-Host "  Installing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
@@ -83,23 +83,35 @@ if ((Test-Path $pythonExe) -and (-not $isStoreStub)) {
                       "Include_test=0", "Include_launcher=0", "Include_doc=0",
                       $targetDirArg)
 
-    $process  = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+    # Run bootstrapper (exits almost immediately - it just launches msiexec)
+    $process  = Start-Process -FilePath $installerPath -ArgumentList $installArgs -PassThru
+    Write-Host "  Bootstrapper started (PID $($process.Id)). Waiting for msiexec..." -ForegroundColor Gray
+
+    # Give the bootstrapper ~3 s to spawn msiexec
+    Start-Sleep -Seconds 3
+
+    # Find the new msiexec process(es) the bootstrapper launched
+    $newMsi = Get-Process -Name "msiexec" -ErrorAction SilentlyContinue |
+              Where-Object { $existingMsiPids -notcontains $_.Id }
+
+    if ($newMsi) {
+        foreach ($msiProc in $newMsi) {
+            Write-Host "  Waiting for msiexec (PID $($msiProc.Id)) to complete..." -ForegroundColor Gray
+            $msiProc.WaitForExit(300000)   # up to 5 min
+            Write-Host "  msiexec exited with code: $($msiProc.ExitCode)" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  No new msiexec found - installer may have exited without running MSI." -ForegroundColor Yellow
+        # Fallback: wait a bit and check anyway
+        Start-Sleep -Seconds 5
+    }
+
+    # Wait for bootstrapper to finish as well
+    $process.WaitForExit(30000) | Out-Null
     $exitCode = $process.ExitCode
-    Write-Host "  [DEBUG] Installer exit code: $exitCode" -ForegroundColor Gray
+    Write-Host "  [DEBUG] Bootstrapper exit code: $exitCode" -ForegroundColor Gray
 
     Remove-Item $installerPath -ErrorAction SilentlyContinue
-
-    # Poll for python.exe in case msiexec is still running in the background
-    if (-not (Test-Path $pythonExe)) {
-        Write-Host "  python.exe not yet present, waiting for msiexec to finish (up to 3 min)..." -ForegroundColor Yellow
-        $timeout = 180
-        $elapsed = 0
-        while (-not (Test-Path $pythonExe) -and $elapsed -lt $timeout) {
-            Start-Sleep -Seconds 3
-            $elapsed += 3
-            Write-Host "  ... $elapsed s" -ForegroundColor Gray
-        }
-    }
 
     if ($exitCode -ne 0) {
         Write-Host "  ERROR: Python installation failed (exit code $exitCode)." -ForegroundColor Red
