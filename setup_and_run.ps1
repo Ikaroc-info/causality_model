@@ -143,23 +143,43 @@ if ($pythonFound) {
         exit 1
     }
 
-
     $targetDirArg = 'TargetDir="' + $pythonDir + '"'
-    $installArgs  = @("InstallAllUsers=0", "PrependPath=0",
+    $installArgs  = @("/quiet", "InstallAllUsers=0", "PrependPath=0",
                       "Include_test=0", "Include_launcher=0", "Include_doc=0",
                       $targetDirArg)
 
+    Write-Host "  Installing Python $PYTHON_VERSION silently..." -ForegroundColor Yellow
     Write-Host "  [DEBUG] TargetDir : $pythonDir" -ForegroundColor Gray
-    Write-Host "  Launching Python installer with full UI..." -ForegroundColor Yellow
-    Write-Host "  -> Please follow the installer steps." -ForegroundColor Cyan
-    Write-Host "  -> Install to: $pythonDir" -ForegroundColor Cyan
-    Write-Host "  -> When done, close the installer to continue." -ForegroundColor Cyan
 
-    $process  = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+    # Snapshot existing msiexec PIDs so we can wait for the new one
+    $existingMsiPids = (Get-Process -Name "msiexec" -ErrorAction SilentlyContinue).Id
+
+    # The bootstrapper exits almost immediately after spawning msiexec
+    $process = Start-Process -FilePath $installerPath -ArgumentList $installArgs `
+                             -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 3
+
+    # Wait for the new msiexec process (the actual installer)
+    $newMsi = Get-Process -Name "msiexec" -ErrorAction SilentlyContinue |
+              Where-Object { $existingMsiPids -notcontains $_.Id }
+
+    if ($newMsi) {
+        foreach ($msiProc in $newMsi) {
+            Write-Host "  Waiting for msiexec (PID $($msiProc.Id)) to complete..." -ForegroundColor Gray
+            $msiProc.WaitForExit(300000)
+            Write-Host "  msiexec exit code: $($msiProc.ExitCode)" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  No msiexec found - waiting for bootstrapper to finish..." -ForegroundColor Gray
+        $process.WaitForExit(120000)
+    }
+
+    $process.WaitForExit(10000) | Out-Null
     $exitCode = $process.ExitCode
-    Write-Host "  Installer exit code: $exitCode" -ForegroundColor Gray
+    Write-Host "  Bootstrapper exit code: $exitCode" -ForegroundColor Gray
 
     Remove-Item $installerPath -ErrorAction SilentlyContinue
+
 
     if ($exitCode -ne 0) {
         Write-Host "  ERROR: Python installation failed (exit code $exitCode)." -ForegroundColor Red
