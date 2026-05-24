@@ -98,33 +98,10 @@ if (Test-Path $pythonExe) {
     Write-Host "  Ready: $versionOutput" -ForegroundColor Green
 }
 
-# --- Step 2: Create virtual environment ---
+# --- Step 2: Install requirements ---
+# (No venv needed: the embeddable Python in .python\ is already isolated)
 Write-Host ""
-Write-Host "[2/4] Setting up virtual environment..." -ForegroundColor Yellow
-
-if (-not (Test-Path $VENV_DIR)) {
-    Write-Host "  Creating virtual environment in '$VENV_DIR'..."
-    & $pythonExe -m venv $VENV_DIR
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  ERROR: Failed to create virtual environment." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    Write-Host "  Virtual environment created." -ForegroundColor Green
-} else {
-    Write-Host "  Virtual environment already exists, skipping creation." -ForegroundColor Green
-}
-
-if (-not (Test-Path $venvPython)) {
-    Write-Host "  ERROR: venv Python not found at $venvPython" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-# --- Step 3: Install requirements ---
-Write-Host ""
-Write-Host "[3/4] Installing dependencies..." -ForegroundColor Yellow
+Write-Host "[2/4] Installing dependencies..." -ForegroundColor Yellow
 
 if (-not (Test-Path $REQUIREMENTS_FILE)) {
     Write-Host "  ERROR: $REQUIREMENTS_FILE not found!" -ForegroundColor Red
@@ -133,10 +110,10 @@ if (-not (Test-Path $REQUIREMENTS_FILE)) {
 }
 
 Write-Host "  Upgrading pip..."
-& $venvPython -m pip install --upgrade pip --quiet 2>&1 | Out-Null
+& $pythonExe -m pip install --upgrade pip --quiet 2>&1 | Out-Null
 
 Write-Host "  Installing packages from $REQUIREMENTS_FILE (this may take a few minutes)..."
-& $venvPip install -r $REQUIREMENTS_FILE
+& $pythonExe -m pip install -r $REQUIREMENTS_FILE
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: Failed to install some dependencies." -ForegroundColor Red
@@ -145,14 +122,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  All dependencies installed!" -ForegroundColor Green
 
-# --- Step 4: Launch the application ---
+# --- Step 3: Launch the application ---
 Write-Host ""
-Write-Host "[4/4] Launching application..." -ForegroundColor Yellow
-Write-Host "  Running: $venvPython $APP_FILE" -ForegroundColor Gray
+Write-Host "[3/4] Launching application..." -ForegroundColor Yellow
+Write-Host "  Running: $pythonExe $APP_FILE" -ForegroundColor Gray
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-& $venvPython $APP_FILE
+& $pythonExe $APP_FILE
 
 Write-Host ""
 Write-Host "Application closed." -ForegroundColor Cyan
