@@ -65,15 +65,35 @@ if (Test-Path $pythonExe) {
         exit 1
     }
 
-    # Use & call operator: handles path quoting natively, no ArgumentList quoting bugs.
+    # Use Start-Process -Wait (more reliable than & for MSI-based installers
+    # that may spawn a child msiexec process).
+    # TargetDir is passed as the last element of an array: PowerShell joins with
+    # spaces, and the inner quotes survive because they are part of the string value.
     Write-Host "  [DEBUG] TargetDir     : $pythonDir" -ForegroundColor Gray
     Write-Host "  Installing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
-    & $installerPath /quiet InstallAllUsers=0 PrependPath=0 Include_test=0 Include_launcher=0 Include_doc=0 "TargetDir=$pythonDir"
-    $exitCode = $LASTEXITCODE
+    $targetDirArg = 'TargetDir="' + $pythonDir + '"'
+    $installArgs  = @("/quiet", "InstallAllUsers=0", "PrependPath=0",
+                      "Include_test=0", "Include_launcher=0", "Include_doc=0",
+                      $targetDirArg)
+
+    $process  = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+    $exitCode = $process.ExitCode
     Write-Host "  [DEBUG] Installer exit code: $exitCode" -ForegroundColor Gray
 
     Remove-Item $installerPath -ErrorAction SilentlyContinue
+
+    # Poll for python.exe in case msiexec is still running in the background
+    if (-not (Test-Path $pythonExe)) {
+        Write-Host "  python.exe not yet present, waiting for msiexec to finish (up to 3 min)..." -ForegroundColor Yellow
+        $timeout = 180
+        $elapsed = 0
+        while (-not (Test-Path $pythonExe) -and $elapsed -lt $timeout) {
+            Start-Sleep -Seconds 3
+            $elapsed += 3
+            Write-Host "  ... $elapsed s" -ForegroundColor Gray
+        }
+    }
 
     if ($exitCode -ne 0) {
         Write-Host "  ERROR: Python installation failed (exit code $exitCode)." -ForegroundColor Red
