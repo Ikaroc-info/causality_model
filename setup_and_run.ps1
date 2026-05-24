@@ -11,7 +11,9 @@
 
 # --- Configuration ---
 $PYTHON_VERSION    = "3.11.9"
-$PYTHON_DIR        = ".python"
+# Install into LOCALAPPDATA\Programs to avoid dot-path and relative-path issues
+# with the MSI installer engine, and to avoid Windows Defender false positives.
+$PYTHON_DIR        = Join-Path $env:LOCALAPPDATA "Programs\CausalityModelPython"
 $VENV_DIR          = ".venv"
 $REQUIREMENTS_FILE = "requirements.txt"
 $APP_FILE          = "app.py"
@@ -63,16 +65,12 @@ if (Test-Path $pythonExe) {
         exit 1
     }
 
-    # Build argument string with TargetDir properly quoted (handles spaces in path)
-    $installArgs = "/quiet InstallAllUsers=0 PrependPath=0 Include_test=0 Include_launcher=0 Include_doc=0 TargetDir=`"$pythonDir`""
-    Write-Host "  [DEBUG] installArgs   : $installArgs" -ForegroundColor Gray
-    Write-Host "  Installing Python $PYTHON_VERSION into '$PYTHON_DIR'..." -ForegroundColor Yellow
+    # Use & call operator: handles path quoting natively, no ArgumentList quoting bugs.
+    Write-Host "  [DEBUG] TargetDir     : $pythonDir" -ForegroundColor Gray
+    Write-Host "  Installing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
-    $process = Start-Process -FilePath $installerPath `
-                             -ArgumentList $installArgs `
-                             -Wait -PassThru
-
-    $exitCode = $process.ExitCode
+    & $installerPath /quiet InstallAllUsers=0 PrependPath=0 Include_test=0 Include_launcher=0 Include_doc=0 "TargetDir=$pythonDir"
+    $exitCode = $LASTEXITCODE
     Write-Host "  [DEBUG] Installer exit code: $exitCode" -ForegroundColor Gray
 
     Remove-Item $installerPath -ErrorAction SilentlyContinue
