@@ -41,43 +41,75 @@ if (Test-Path $pythonExe) {
     $ver = & $pythonExe --version 2>&1
     Write-Host "  Already installed: $ver" -ForegroundColor Green
 } else {
-    Write-Host "  Downloading Python $PYTHON_VERSION from python.org..." -ForegroundColor Yellow
-    Write-Host "  URL: $PYTHON_URL" -ForegroundColor Gray
+    # -- Diagnostics --
+    Write-Host "  [DEBUG] PSScriptRoot  : $PSScriptRoot" -ForegroundColor Gray
+    Write-Host "  [DEBUG] pythonDir     : $pythonDir" -ForegroundColor Gray
+    Write-Host "  [DEBUG] pythonExe     : $pythonExe" -ForegroundColor Gray
 
+    Write-Host "  Downloading Python $PYTHON_VERSION from python.org..." -ForegroundColor Yellow
     $installerPath = Join-Path $PSScriptRoot $INSTALLER_NAME
 
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $PYTHON_URL -OutFile $installerPath -UseBasicParsing
-        Write-Host "  Download complete." -ForegroundColor Green
+        $installerSize = (Get-Item $installerPath).Length
+        Write-Host "  Download complete. File size: $([math]::Round($installerSize/1MB, 1)) MB" -ForegroundColor Green
+        if ($installerSize -lt 1MB) {
+            Write-Host "  WARNING: file seems too small, download may have failed." -ForegroundColor Red
+        }
     } catch {
         Write-Host "  ERROR: Failed to download Python installer: $_" -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
 
-    # Install silently to local directory — no admin, no PATH modification.
-    # IMPORTANT: TargetDir is quoted to handle paths with spaces.
-    Write-Host "  Installing Python $PYTHON_VERSION into '$PYTHON_DIR'..." -ForegroundColor Yellow
-    Write-Host "  (No admin rights required, no system changes)" -ForegroundColor Gray
-
+    # Build argument string with TargetDir properly quoted (handles spaces in path)
     $installArgs = "/quiet InstallAllUsers=0 PrependPath=0 Include_test=0 Include_launcher=0 Include_doc=0 TargetDir=`"$pythonDir`""
+    Write-Host "  [DEBUG] installArgs   : $installArgs" -ForegroundColor Gray
+    Write-Host "  Installing Python $PYTHON_VERSION into '$PYTHON_DIR'..." -ForegroundColor Yellow
 
     $process = Start-Process -FilePath $installerPath `
                              -ArgumentList $installArgs `
-                             -Wait -PassThru -NoNewWindow
+                             -Wait -PassThru
+
+    $exitCode = $process.ExitCode
+    Write-Host "  [DEBUG] Installer exit code: $exitCode" -ForegroundColor Gray
 
     Remove-Item $installerPath -ErrorAction SilentlyContinue
 
-    if ($process.ExitCode -ne 0) {
-        Write-Host "  ERROR: Python installation failed (exit code $($process.ExitCode))." -ForegroundColor Red
+    if ($exitCode -ne 0) {
+        Write-Host "  ERROR: Python installation failed (exit code $exitCode)." -ForegroundColor Red
+        Write-Host "  Common causes:" -ForegroundColor Yellow
+        Write-Host "    - Exit code 1602 : user cancelled the UAC prompt" -ForegroundColor Yellow
+        Write-Host "    - Exit code 1603 : fatal error during installation" -ForegroundColor Yellow
+        Write-Host "    - Exit code 1618 : another install is already running" -ForegroundColor Yellow
         Read-Host "Press Enter to exit"
         exit 1
     }
 
+    # List what was actually created in pythonDir (even if python.exe is missing)
+    Write-Host "  [DEBUG] Contents of '$pythonDir' after install:" -ForegroundColor Gray
+    if (Test-Path $pythonDir) {
+        Get-ChildItem $pythonDir | ForEach-Object {
+            Write-Host "    $($_.Name)" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "    (directory does not exist)" -ForegroundColor Red
+    }
+
     if (-not (Test-Path $pythonExe)) {
         Write-Host "  ERROR: python.exe not found after installation." -ForegroundColor Red
-        Write-Host "  Expected location: $pythonExe" -ForegroundColor Gray
+        Write-Host "  Expected: $pythonExe" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  Searching for python.exe on this machine..." -ForegroundColor Yellow
+        $found = Get-ChildItem -Path $env:LOCALAPPDATA, $env:APPDATA, "C:\Python*", "C:\Program Files\Python*" `
+                               -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue |
+                 Select-Object -First 5 FullName
+        if ($found) {
+            $found | ForEach-Object { Write-Host "    Found: $($_.FullName)" -ForegroundColor Cyan }
+        } else {
+            Write-Host "    None found." -ForegroundColor Gray
+        }
         Read-Host "Press Enter to exit"
         exit 1
     }
