@@ -29,10 +29,26 @@ Write-Host ""
 
 # --- Paths (absolute) ---
 # Default target dir for a fresh install.
-$pythonDir  = "$env:LOCALAPPDATA\Programs\CausalityModelPython"
+# If %LOCALAPPDATA% contains non-ASCII characters (accents, etc.) Python can
+# fail with "failed to get the Python codec of the filesystem encoding".
+# In that case we fall back to a pure-ASCII path under C:\ProgramData.
+$localAppData = $env:LOCALAPPDATA
+$hasNonAscii  = ($localAppData -cmatch '[^\x00-\x7F]')
+if ($hasNonAscii) {
+    Write-Host "  WARNING: LOCALAPPDATA contains non-ASCII characters: '$localAppData'" -ForegroundColor Yellow
+    Write-Host "           Using fallback path to avoid Python codec errors." -ForegroundColor Yellow
+    $pythonDir = "C:\ProgramData\CausalityModelPython"
+} else {
+    $pythonDir = "$localAppData\Programs\CausalityModelPython"
+}
 $pythonExe  = "$pythonDir\python.exe"
 $venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
 $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
+
+# Force UTF-8 mode for all Python invocations in this session.
+# This prevents "failed to get the Python codec of the filesystem encoding".
+$env:PYTHONUTF8        = "1"
+$env:PYTHONIOENCODING  = "utf-8"
 
 # --- Step 1: Find or install Python 3.11 ---
 Write-Host "[1/4] Preparing Python $PYTHON_VERSION..." -ForegroundColor Yellow
@@ -228,10 +244,14 @@ Write-Host "[2/4] Setting up virtual environment..." -ForegroundColor Yellow
 
 if (-not (Test-Path $VENV_DIR)) {
     Write-Host "  Creating virtual environment in '$VENV_DIR'..."
-    & $pythonExe -m venv $VENV_DIR
+    # Run venv with UTF-8 flags explicitly on the command line as a safety net
+    & $pythonExe -X utf8 -m venv $VENV_DIR
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ERROR: Failed to create virtual environment." -ForegroundColor Red
+        Write-Host "  TIP: If you saw 'failed to get the Python codec of the filesystem encoding'," -ForegroundColor Yellow
+        Write-Host "       it usually means your user profile path contains non-ASCII characters." -ForegroundColor Yellow
+        Write-Host "       The script already tries C:\ProgramData as a fallback for that case." -ForegroundColor Yellow
         Read-Host "Press Enter to exit"
         exit 1
     }
