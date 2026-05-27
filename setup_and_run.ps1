@@ -93,7 +93,8 @@ Write-Log ""
 # =============================================================================
 if ($Clean) {
     Write-Log "[0/4] Cleaning previous installation..." -Color Yellow
-    foreach ($d in @($pythonDir, $VENV_DIR)) {
+
+    foreach ($d in @($pythonDir, $VENV_DIR, $appInstallDir)) {
         if (Test-Path $d) {
             Write-Log "  Removing: $d" -Color Gray
             Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
@@ -101,12 +102,26 @@ if ($Clean) {
             else { Write-Log "  WARNING: could not fully remove $d" -Color Yellow }
         }
     }
+
+    # Supprime aussi le raccourci bureau
+    try {
+        $shell   = New-Object -ComObject WScript.Shell
+        $lnkPath = "$($shell.SpecialFolders('Desktop'))\Causality Model.lnk"
+        if (Test-Path $lnkPath) {
+            Remove-Item $lnkPath -Force
+            Write-Log "  Removed desktop shortcut." -Color Green
+        }
+    } catch {
+        Write-Log "  WARNING: could not remove shortcut: $_" -Color Yellow
+    }
+
     Write-Log ""
     Flush-ToRelay "Step 0 done"
 } else {
     Write-Log "[0/4] Skipping clean (use -Clean to force reinstall)." -Color Gray
     Write-Log ""
 }
+
 
 Write-Log ""
 Flush-ToRelay "Step 0 done"
