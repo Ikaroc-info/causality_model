@@ -103,6 +103,32 @@ if (Test-Path $VENV_DIR) {
     if (-not (Test-Path $VENV_DIR)) { Write-Log "  Removed." -Color Green }
 }
 
+# Nettoie les cles de registre Python 3.11 pour eviter que l'installeur
+# entre en mode Modifier/Reparer silencieux (bloquant sans afficher de fenetre).
+Write-Log "  Cleaning Python 3.11 registry entries..." -Color Gray
+
+$pythonCoreKey = "HKCU:\Software\Python\PythonCore"
+if (Test-Path $pythonCoreKey) {
+    Get-ChildItem $pythonCoreKey -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.PSChildName -like "3.11*") {
+            Write-Log "    Removing: $($_.PSChildName)" -Color Gray
+            Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+$uninstallRoot = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+if (Test-Path $uninstallRoot) {
+    Get-ChildItem $uninstallRoot -ErrorAction SilentlyContinue | ForEach-Object {
+        $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+        if ($props.DisplayName -like "*Python 3.11*") {
+            Write-Log "    Removing uninstall entry: $($props.DisplayName)" -Color Gray
+            Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Write-Log "  Registry cleaned." -Color Green
 Write-Log ""
 Flush-ToRelay "Step 0 done"
 
@@ -133,29 +159,31 @@ try {
     )
 
     Write-Log "  Starting installer (silent, user install)..." -Color Gray
-    Write-Log "  Install dir will be: $pythonDir" -Color Gray
-    $proc = Start-Process -FilePath $instPath -ArgumentList $installArgs -WindowStyle Hidden -PassThru
+    Write-Log "  Install dir: $pythonDir" -Color Gray
+    # -Wait: attend que le bootstrapper ET ses enfants msiexec terminent
+    $proc = Start-Process -FilePath $instPath -ArgumentList $installArgs -Wait -PassThru
+    $exitCode = $proc.ExitCode
+    Remove-Item $instPath -ErrorAction SilentlyContinue
+    Write-Log "  Installer exit code: $exitCode" -Color Gray
 
-    # Poll jusqu'a ce que Lib\os.py apparaisse = installation reellement terminee.
-    # Le bootstrapper peut se terminer avant que msiexec finisse, d'ou le poll.
-    Write-Log "  Waiting for installation to complete (polling Lib\os.py)..." -Color Gray
-    $timeoutSec = 300
+    if ($exitCode -ne 0) {
+        Exit-WithError "Installer failed (exit $exitCode). 1602=UAC annule, 1603=erreur fatale, 1618=install en cours."
+    }
+
+    # Poll court pour attendre les eventuels msiexec enfants restants
+    Write-Log "  Waiting for Lib\os.py..." -Color Gray
+    $timeoutSec = 60
     $elapsed    = 0
     $ready      = $false
     while ($elapsed -lt $timeoutSec) {
-        Start-Sleep -Seconds 4
-        $elapsed += 4
+        Start-Sleep -Seconds 3
+        $elapsed += 3
         if (Test-Path "$pythonDir\Lib\os.py") {
             $ready = $true
-            Write-Log "  Installation complete! ($elapsed s)" -Color Green
+            Write-Log "  Lib\os.py found! ($elapsed s)" -Color Green
             break
         }
-        if ($elapsed % 20 -eq 0) {
-            Write-Log "  Still waiting... ($elapsed / $timeoutSec s)" -Color Gray
-        }
     }
-
-    Remove-Item $instPath -ErrorAction SilentlyContinue
 
     if (-not $ready) {
         Exit-WithError "Timeout: Lib\os.py not found after $timeoutSec s. Installation may have failed."
