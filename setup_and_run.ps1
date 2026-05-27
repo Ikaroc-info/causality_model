@@ -3,8 +3,9 @@
     Setup and run the Causality Model application.
 .DESCRIPTION
     This script:
-    0. Cleans up any previous Python local install and .venv to ensure a fresh state
+    0. Cleans up previous local Python install dir and .venv
     1. Downloads Python 3.11 from python.org and installs it locally (no admin required)
+       - Includes Tcl/Tk for tkinter support (Include_tcltk=1)
     2. Creates a virtual environment (.venv)
     3. Installs requirements from requirements.txt
     4. Launches app.py
@@ -28,309 +29,182 @@ Write-Host "  Causality Model - Setup & Launch"      -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Paths (absolute) ---
-# Default target dir for a fresh install.
-# If %LOCALAPPDATA% contains non-ASCII characters (accents, etc.) Python can
-# fail with "failed to get the Python codec of the filesystem encoding".
-# In that case we fall back to a pure-ASCII path under C:\ProgramData.
-$localAppData = $env:LOCALAPPDATA
-$hasNonAscii  = ($localAppData -cmatch '[^\x00-\x7F]')
-if ($hasNonAscii) {
-    Write-Host "  WARNING: LOCALAPPDATA contains non-ASCII characters: '$localAppData'" -ForegroundColor Yellow
-    Write-Host "           Using fallback path to avoid Python codec errors." -ForegroundColor Yellow
-    $pythonDir = "C:\ProgramData\CausalityModelPython"
-} else {
-    $pythonDir = "$localAppData\Programs\CausalityModelPython"
-}
+# --- Paths ---
+$pythonDir  = "$env:LOCALAPPDATA\Programs\CausalityModelPython"
 $pythonExe  = "$pythonDir\python.exe"
 $venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
 $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
 
-# Force UTF-8 mode for all Python invocations in this session.
-# This prevents "failed to get the Python codec of the filesystem encoding".
-$env:PYTHONUTF8        = "1"
-$env:PYTHONIOENCODING  = "utf-8"
+Write-Host "  [DEBUG] Script dir : $PSScriptRoot" -ForegroundColor Gray
+Write-Host "  [DEBUG] Python dir : $pythonDir"    -ForegroundColor Gray
+Write-Host ""
 
-# --- Step 0: Clean previous install to guarantee a fresh, uncorrupted state ---
+# =============================================================================
+# Step 0 - Clean previous state
+# =============================================================================
 Write-Host "[0/4] Cleaning previous installation..." -ForegroundColor Yellow
 
-# Remove the local Python directory (if it exists)
 if (Test-Path $pythonDir) {
-    Write-Host "  Removing existing Python dir: $pythonDir" -ForegroundColor Gray
+    Write-Host "  Removing previous Python dir: $pythonDir" -ForegroundColor Gray
     Remove-Item -Recurse -Force $pythonDir -ErrorAction SilentlyContinue
     if (Test-Path $pythonDir) {
-        Write-Host "  WARNING: could not fully remove '$pythonDir' (files may be in use)." -ForegroundColor Yellow
+        Write-Host "  WARNING: could not fully remove Python dir (files in use?)." -ForegroundColor Yellow
     } else {
         Write-Host "  Python dir removed." -ForegroundColor Green
     }
 } else {
-    Write-Host "  No previous Python dir found, skipping." -ForegroundColor Gray
+    Write-Host "  No previous Python dir found." -ForegroundColor Gray
 }
 
-# Also clean the legacy AppData path in case a previous version installed there
-$legacyDir = "$localAppData\Programs\CausalityModelPython"
-if (($legacyDir -ne $pythonDir) -and (Test-Path $legacyDir)) {
-    Write-Host "  Removing legacy Python dir: $legacyDir" -ForegroundColor Gray
-    Remove-Item -Recurse -Force $legacyDir -ErrorAction SilentlyContinue
-}
-
-# Remove the virtual environment
 if (Test-Path $VENV_DIR) {
-    Write-Host "  Removing existing .venv..." -ForegroundColor Gray
+    Write-Host "  Removing previous .venv..." -ForegroundColor Gray
     Remove-Item -Recurse -Force $VENV_DIR -ErrorAction SilentlyContinue
     if (Test-Path $VENV_DIR) {
-        Write-Host "  WARNING: could not fully remove '$VENV_DIR' (files may be in use)." -ForegroundColor Yellow
+        Write-Host "  WARNING: could not fully remove .venv (files in use?)." -ForegroundColor Yellow
     } else {
         Write-Host "  .venv removed." -ForegroundColor Green
     }
 } else {
-    Write-Host "  No previous .venv found, skipping." -ForegroundColor Gray
+    Write-Host "  No previous .venv found." -ForegroundColor Gray
 }
 
 Write-Host "  Cleanup done." -ForegroundColor Green
 Write-Host ""
 
-# --- Step 1: Install Python 3.11 ---
-Write-Host "[1/4] Installing Python $PYTHON_VERSION..." -ForegroundColor Yellow
+# =============================================================================
+# Step 1 - Download and install Python 3.11 (with tkinter / Tcl-Tk)
+# =============================================================================
+Write-Host "[1/4] Installing Python $PYTHON_VERSION (with tkinter)..." -ForegroundColor Yellow
 
-# 1a. Check the Windows registry: the Python installer always registers itself
-#     under HKCU:\Software\Python\PythonCore\<version>\InstallPath.
-#     This is the most reliable way to find a previous user-install.
-$regBase = "HKCU:\Software\Python\PythonCore"
-foreach ($ver in @("3.11", "3.11.9")) {
-    $regKey = "$regBase\$ver\InstallPath"
-    if (Test-Path $regKey) {
-        $regDir = (Get-ItemProperty $regKey -ErrorAction SilentlyContinue).'(default)'
-        if ($regDir) {
-            $candidate = "$($regDir.TrimEnd('\'))\python.exe"
-            if ((Test-Path $candidate) -and ($candidate -notlike "*WindowsApps*")) {
-                $pythonDir = $regDir.TrimEnd('\')
-                $pythonExe = $candidate
-                Write-Host "  Found via registry: $pythonExe" -ForegroundColor Green
-            }
-        }
-    }
+$installerPath = "$PSScriptRoot\$INSTALLER_NAME"
+
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Write-Host "  Downloading Python installer (~25 MB)..." -ForegroundColor Gray
+    Invoke-WebRequest -Uri $PYTHON_URL -OutFile $installerPath -UseBasicParsing
+    $size = [math]::Round((Get-Item $installerPath).Length / 1MB, 1)
+    Write-Host "  Download complete ($size MB)." -ForegroundColor Green
+} catch {
+    Write-Host "  ERROR: Failed to download Python installer: $_" -ForegroundColor Red
+    Read-Host "Press Enter to exit"; exit 1
 }
 
-# 1b. Check our own install dir (in case registry was cleared but files remain).
-if (-not ((Test-Path $pythonExe) -and ($pythonExe -notlike "*WindowsApps*"))) {
-    $ownExe = "$env:LOCALAPPDATA\Programs\CausalityModelPython\python.exe"
-    if (Test-Path $ownExe) {
-        $pythonDir = "$env:LOCALAPPDATA\Programs\CausalityModelPython"
-        $pythonExe = $ownExe
-        Write-Host "  Found local install: $pythonExe" -ForegroundColor Green
-    }
+# Install silently into our own dir.
+# Include_tcltk=1  → ensures tkinter, Tcl/Tk DLLs are included.
+# NOTE: we do NOT run msiexec /x to uninstall old components first —
+#       that was breaking shared MSI state and leaving Lib/ missing.
+$targetDirArg = 'TargetDir="' + $pythonDir + '"'
+$installArgs  = @(
+    "/quiet", "/norestart",
+    "InstallAllUsers=0",
+    "PrependPath=0",
+    "Include_test=0",
+    "Include_launcher=0",
+    "Include_doc=0",
+    "Include_tcltk=1",
+    $targetDirArg
+)
+
+Write-Host "  Running installer (this may take 1-2 minutes)..." -ForegroundColor Gray
+Write-Host "  [DEBUG] TargetDir: $pythonDir" -ForegroundColor Gray
+
+# Start the bootstrapper and wait fully for it.
+# The Python installer bootstrapper spawns one or more msiexec child processes.
+# We wait for the bootstrapper itself with a generous timeout (10 min).
+$proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs `
+                      -WindowStyle Hidden -PassThru -Wait
+$exitCode = $proc.ExitCode
+
+Remove-Item $installerPath -ErrorAction SilentlyContinue
+
+Write-Host "  Installer exit code: $exitCode" -ForegroundColor Gray
+
+if ($exitCode -ne 0) {
+    Write-Host "  ERROR: Python installation failed (exit code $exitCode)." -ForegroundColor Red
+    Write-Host "    1602 = UAC cancelled  |  1603 = fatal error  |  1618 = another install running" -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"; exit 1
 }
 
-$pythonFound = (Test-Path $pythonExe) -and ($pythonExe -notlike "*WindowsApps*")
-
-if ($pythonFound) {
-    $ver = & $pythonExe --version 2>&1
-    Write-Host "  Using: $pythonExe ($ver)" -ForegroundColor Green
+# Verify installation
+Write-Host "  [DEBUG] Contents of '$pythonDir':" -ForegroundColor Gray
+if (Test-Path $pythonDir) {
+    Get-ChildItem $pythonDir | ForEach-Object { Write-Host "    $($_.Name)" -ForegroundColor Gray }
 } else {
-    Write-Host "  Python 3.11 not found - downloading installer..." -ForegroundColor Yellow
-    # -- Diagnostics --
-    Write-Host "  [DEBUG] PSScriptRoot  : $PSScriptRoot" -ForegroundColor Gray
-    Write-Host "  [DEBUG] pythonDir     : $pythonDir" -ForegroundColor Gray
-
-    Write-Host "  [DEBUG] pythonExe     : $pythonExe" -ForegroundColor Gray
-
-    # --- Cleanup broken Python 3.11 MSI registration ---
-    # The installer shows "Modify/Repair/Uninstall" when a previous install is
-    # registered in the MSI database but the files no longer exist.
-    # We must remove those registry entries first so a fresh install can proceed.
-    Write-Host "  Cleaning up broken Python 3.11 installation records..." -ForegroundColor Yellow
-
-    $uninstallRoots = @(
-        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-    )
-
-    $removedAny = $false
-    foreach ($root in $uninstallRoots) {
-        if (-not (Test-Path $root)) { continue }
-        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
-            $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
-            if ($props.DisplayName -like "*Python 3.11*") {
-                $guid = $_.PSChildName
-                Write-Host "  Removing: $($props.DisplayName) [$guid]" -ForegroundColor Gray
-                Start-Process "msiexec.exe" -ArgumentList "/x", $guid, "/quiet", "/norestart" -Wait -ErrorAction SilentlyContinue
-                # Also delete the registry key directly in case msiexec fails
-                Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-                $removedAny = $true
-            }
-        }
-    }
-
-    # Remove the Python PythonCore registry key (python.org's own registry entry)
-    $pythonCoreKey = "HKCU:\Software\Python\PythonCore"
-    if (Test-Path $pythonCoreKey) {
-        Get-ChildItem $pythonCoreKey -ErrorAction SilentlyContinue | ForEach-Object {
-            if ($_.PSChildName -like "3.11*") {
-                Write-Host "  Removing PythonCore registry: $($_.PSPath)" -ForegroundColor Gray
-                Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-                $removedAny = $true
-            }
-        }
-    }
-
-    if ($removedAny) {
-        Write-Host "  Cleanup done. Proceeding with fresh install." -ForegroundColor Green
-    } else {
-        Write-Host "  No broken registrations found." -ForegroundColor Gray
-    }
-
-    # --- Download and install Python ---
-    Write-Host "  Downloading Python $PYTHON_VERSION from python.org..." -ForegroundColor Yellow
-    $installerPath = Join-Path $PSScriptRoot $INSTALLER_NAME
-
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $PYTHON_URL -OutFile $installerPath -UseBasicParsing
-        $installerSize = (Get-Item $installerPath).Length
-        Write-Host "  Download complete. File size: $([math]::Round($installerSize/1MB, 1)) MB" -ForegroundColor Green
-        if ($installerSize -lt 1MB) {
-            Write-Host "  WARNING: file seems too small, download may have failed." -ForegroundColor Red
-        }
-    } catch {
-        Write-Host "  ERROR: Failed to download Python installer: $_" -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-
-    $targetDirArg = 'TargetDir="' + $pythonDir + '"'
-    $installArgs  = @("/quiet", "InstallAllUsers=0", "PrependPath=0",
-                      "Include_test=0", "Include_launcher=0", "Include_doc=0",
-                      $targetDirArg)
-
-    Write-Host "  Installing Python $PYTHON_VERSION silently..." -ForegroundColor Yellow
-    Write-Host "  [DEBUG] TargetDir : $pythonDir" -ForegroundColor Gray
-
-    # Snapshot existing msiexec PIDs so we can wait for the new one
-    $existingMsiPids = (Get-Process -Name "msiexec" -ErrorAction SilentlyContinue).Id
-
-    # The bootstrapper exits almost immediately after spawning msiexec
-    $process = Start-Process -FilePath $installerPath -ArgumentList $installArgs `
-                             -WindowStyle Hidden -PassThru
-    Start-Sleep -Seconds 3
-
-    # Wait for the new msiexec process (the actual installer)
-    $newMsi = Get-Process -Name "msiexec" -ErrorAction SilentlyContinue |
-              Where-Object { $existingMsiPids -notcontains $_.Id }
-
-    if ($newMsi) {
-        foreach ($msiProc in $newMsi) {
-            Write-Host "  Waiting for msiexec (PID $($msiProc.Id)) to complete..." -ForegroundColor Gray
-            $msiProc.WaitForExit(300000)
-            Write-Host "  msiexec exit code: $($msiProc.ExitCode)" -ForegroundColor Gray
-        }
-    } else {
-        Write-Host "  No msiexec found - waiting for bootstrapper to finish..." -ForegroundColor Gray
-        $process.WaitForExit(120000)
-    }
-
-    $process.WaitForExit(10000) | Out-Null
-    $exitCode = $process.ExitCode
-    Write-Host "  Bootstrapper exit code: $exitCode" -ForegroundColor Gray
-
-    Remove-Item $installerPath -ErrorAction SilentlyContinue
-
-
-    if ($exitCode -ne 0) {
-        Write-Host "  ERROR: Python installation failed (exit code $exitCode)." -ForegroundColor Red
-        Write-Host "  Common causes:" -ForegroundColor Yellow
-        Write-Host "    - Exit code 1602 : user cancelled the UAC prompt" -ForegroundColor Yellow
-        Write-Host "    - Exit code 1603 : fatal error during installation" -ForegroundColor Yellow
-        Write-Host "    - Exit code 1618 : another install is already running" -ForegroundColor Yellow
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-
-    # List what was actually created in pythonDir (even if python.exe is missing)
-    Write-Host "  [DEBUG] Contents of '$pythonDir' after install:" -ForegroundColor Gray
-    if (Test-Path $pythonDir) {
-        Get-ChildItem $pythonDir | ForEach-Object {
-            Write-Host "    $($_.Name)" -ForegroundColor Gray
-        }
-    } else {
-        Write-Host "    (directory does not exist)" -ForegroundColor Red
-    }
-
-    if (-not (Test-Path $pythonExe)) {
-        Write-Host "  ERROR: python.exe not found after installation." -ForegroundColor Red
-        Write-Host "  Expected: $pythonExe" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "  Searching for python.exe on this machine..." -ForegroundColor Yellow
-        $found = Get-ChildItem -Path $env:LOCALAPPDATA, $env:APPDATA, "C:\Python*", "C:\Program Files\Python*" `
-                               -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue |
-                 Select-Object -First 5 FullName
-        if ($found) {
-            $found | ForEach-Object { Write-Host "    Found: $($_.FullName)" -ForegroundColor Cyan }
-        } else {
-            Write-Host "    None found." -ForegroundColor Gray
-        }
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-
-    $ver = & $pythonExe --version 2>&1
-    Write-Host "  Installed: $ver" -ForegroundColor Green
+    Write-Host "    (directory not found!)" -ForegroundColor Red
 }
 
-# --- Step 2: Create virtual environment ---
+if (-not (Test-Path $pythonExe)) {
+    Write-Host "  ERROR: python.exe not found after install at $pythonExe" -ForegroundColor Red
+    Read-Host "Press Enter to exit"; exit 1
+}
+
+# *** THE KEY FIX ***
+# Set PYTHONHOME so Python always knows where its Lib/ and DLLs/ are,
+# regardless of registry state or current working directory.
+# Without this, Python searches relative to CWD and fails with
+# "failed to get the Python codec of the filesystem encoding".
+$env:PYTHONHOME       = $pythonDir
+$env:PYTHONUTF8       = "1"
+$env:PYTHONIOENCODING = "utf-8"
+
+$ver = & $pythonExe --version 2>&1
+Write-Host "  Installed: $ver" -ForegroundColor Green
+
+# Verify tkinter is available
+Write-Host "  Checking tkinter..." -ForegroundColor Gray
+$tkCheck = & $pythonExe -c "import tkinter; print('tkinter OK')" 2>&1
+if ($tkCheck -like "*OK*") {
+    Write-Host "  tkinter: OK" -ForegroundColor Green
+} else {
+    Write-Host "  WARNING: tkinter check failed: $tkCheck" -ForegroundColor Yellow
+}
 Write-Host ""
+
+# =============================================================================
+# Step 2 - Create virtual environment
+# =============================================================================
 Write-Host "[2/4] Setting up virtual environment..." -ForegroundColor Yellow
 
-if (-not (Test-Path $VENV_DIR)) {
-    Write-Host "  Creating virtual environment in '$VENV_DIR'..."
-    # Run venv with UTF-8 flags explicitly on the command line as a safety net
-    & $pythonExe -X utf8 -m venv $VENV_DIR
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  ERROR: Failed to create virtual environment." -ForegroundColor Red
-        Write-Host "  TIP: If you saw 'failed to get the Python codec of the filesystem encoding'," -ForegroundColor Yellow
-        Write-Host "       it usually means your user profile path contains non-ASCII characters." -ForegroundColor Yellow
-        Write-Host "       The script already tries C:\ProgramData as a fallback for that case." -ForegroundColor Yellow
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    Write-Host "  Virtual environment created." -ForegroundColor Green
-} else {
-    Write-Host "  Virtual environment already exists, skipping." -ForegroundColor Green
+Write-Host "  Creating virtual environment in '$VENV_DIR'..."
+& $pythonExe -X utf8 -m venv $VENV_DIR
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  ERROR: Failed to create virtual environment (exit $LASTEXITCODE)." -ForegroundColor Red
+    Read-Host "Press Enter to exit"; exit 1
 }
 
 if (-not (Test-Path $venvPython)) {
     Write-Host "  ERROR: venv Python not found at $venvPython" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+    Read-Host "Press Enter to exit"; exit 1
 }
 
-# --- Step 3: Install requirements ---
+Write-Host "  Virtual environment created." -ForegroundColor Green
 Write-Host ""
+
+# =============================================================================
+# Step 3 - Install requirements
+# =============================================================================
 Write-Host "[3/4] Installing dependencies..." -ForegroundColor Yellow
 
 if (-not (Test-Path $REQUIREMENTS_FILE)) {
     Write-Host "  ERROR: $REQUIREMENTS_FILE not found!" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+    Read-Host "Press Enter to exit"; exit 1
 }
 
 Write-Host "  Upgrading pip..."
-& $venvPython -m pip install --upgrade pip --quiet 2>&1 | Out-Null
+& $venvPython -m pip install --upgrade pip --quiet
 
-Write-Host "  Installing packages from $REQUIREMENTS_FILE (this may take a few minutes)..."
+Write-Host "  Installing packages from $REQUIREMENTS_FILE (may take a few minutes)..."
 & $venvPip install -r $REQUIREMENTS_FILE
-
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: Failed to install some dependencies." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+    Read-Host "Press Enter to exit"; exit 1
 }
 Write-Host "  All dependencies installed!" -ForegroundColor Green
-
-# --- Step 4: Launch the application ---
 Write-Host ""
+
+# =============================================================================
+# Step 4 - Launch the application
+# =============================================================================
 Write-Host "[4/4] Launching application..." -ForegroundColor Yellow
 Write-Host "  Running: $venvPython $APP_FILE" -ForegroundColor Gray
 Write-Host "========================================" -ForegroundColor Cyan
