@@ -114,22 +114,40 @@ class RelayHandler(BaseHTTPRequestHandler):
 </html>"""
 
 
+def get_local_ip():
+    """Retourne l'IP locale sortante via une connexion UDP factice vers 8.8.8.8."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Relay server")
     parser.add_argument("--host", default="0.0.0.0", help="Adresse d'ecoute (defaut: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8765, help="Port (defaut: 8765)")
     args = parser.parse_args()
 
+    local_ip = get_local_ip()
     server = HTTPServer((args.host, args.port), RelayHandler)
     print(f"Relay server en ecoute sur http://{args.host}:{args.port}")
+    print(f"  -> Accessible depuis le reseau : http://{local_ip}:{args.port}")
     print(f"  POST /log   <- envoyer un message")
     print(f"  GET  /      <- interface HTML (auto-refresh 5s)")
     print(f"  GET  /log   <- historique JSON")
     print(f"  Ctrl+C pour arreter\n")
+    print(f"  Dans setup_and_run.ps1, mettre :")
+    print(f'  $RELAY_URL = "http://{local_ip}:{args.port}/log"\n')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nArret.")
+
 
 
 if __name__ == "__main__":
