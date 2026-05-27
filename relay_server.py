@@ -126,13 +126,25 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     import socket
-    hostname = socket.gethostname()
-    local_ip = socket.gethostbyname(hostname)
 
-    print(f"Relay Server demarrage sur le port {PORT}")
+    # Get the real outgoing network IP (not 127.0.0.1)
+    # This opens a UDP socket without sending anything, just to get the local IP.
+    def get_local_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    local_ip = get_local_ip()
+
+    print(f"Relay Server starting on port {PORT}")
     print(f"  Local  : http://localhost:{PORT}/")
     print(f"  Reseau : http://{local_ip}:{PORT}/")
-    print(f"  POST   : http://<ip>:{PORT}/log")
+    print(f"  POST   : http://{local_ip}:{PORT}/log")
     print("Ctrl+C pour arreter\n")
 
     server = HTTPServer(("0.0.0.0", PORT), Handler)
