@@ -223,6 +223,23 @@ if (-not $venvCreated) {
     & $venvPip install -r $REQUIREMENTS_FILE
     if ($LASTEXITCODE -ne 0) { Exit-WithError "pip install failed (exit $LASTEXITCODE)." }
     Write-Log "  All dependencies installed!" -Color Green
+
+    # Cree un raccourci sur le bureau apres une installation reussie
+    try {
+        $shell    = New-Object -ComObject WScript.Shell
+        $desktop  = $shell.SpecialFolders("Desktop")
+        $lnkPath  = "$desktop\Causality Model.lnk"
+        $shortcut = $shell.CreateShortcut($lnkPath)
+        $shortcut.TargetPath       = "cmd.exe"
+        $shortcut.Arguments        = "/c `"$PSScriptRoot\launch.bat`""
+        $shortcut.WorkingDirectory = $PSScriptRoot
+        $shortcut.WindowStyle      = 1
+        $shortcut.Description      = "Lancer Causality Model"
+        $shortcut.Save()
+        Write-Log "  Raccourci cree sur le bureau: Causality Model.lnk" -Color Green
+    } catch {
+        Write-Log "  WARNING: impossible de creer le raccourci bureau: $_" -Color Yellow
+    }
 }
 Write-Log ""
 Flush-ToRelay "Step 3 done"
