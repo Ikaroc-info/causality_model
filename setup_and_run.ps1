@@ -192,41 +192,11 @@ try {
     }
 }
 
-# ---------------------------------------------------------------------------
-# Method 2: Manual user installation
-# ---------------------------------------------------------------------------
 if (-not $installed) {
     Write-Host ""
-    Write-Host "  [Method 2/2] Please install Python $PYTHON_VERSION manually:" -ForegroundColor Yellow
-    Write-Host "    1. Go to https://www.python.org/downloads/release/python-3119/" -ForegroundColor Cyan
-    Write-Host "    2. Download 'Windows installer (64-bit)'" -ForegroundColor Cyan
-    Write-Host "    3. Run installer - check 'Add Python to PATH'" -ForegroundColor Cyan
-    Write-Host "    4. In Optional Features, keep 'tcl/tk and IDLE' checked" -ForegroundColor Cyan
-    Write-Host ""
-    Start-Process "https://www.python.org/downloads/release/python-3119/"
-    Read-Host "  Press Enter once Python is installed..."
-
-    $pythonInPath = Get-Command python -ErrorAction SilentlyContinue
-    $candidates = @(
-        $(if ($pythonInPath) { $pythonInPath.Source } else { $null }),
-        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
-        "C:\Python311\python.exe",
-        "$env:ProgramFiles\Python311\python.exe"
-    ) | Where-Object { $_ -and (Test-Path $_) }
-
-    foreach ($c in $candidates) {
-        if (Test-PythonOk $c) {
-            Write-Host "  Found: $c" -ForegroundColor Green
-            $pythonExe = $c
-            $installed = $true
-            break
-        }
-    }
-
-    if (-not $installed) {
-        Write-Host "  ERROR: No working Python found. Please re-run after installing." -ForegroundColor Red
-        Read-Host "Press Enter to exit"; exit 1
-    }
+    Write-Host "  ERROR: Automatic Python installation failed." -ForegroundColor Red
+    Write-Host "  Please check your internet connection and re-run launch.bat." -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"; exit 1
 }
 
 # Set PYTHONHOME for the rest of the session
