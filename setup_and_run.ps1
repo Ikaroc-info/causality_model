@@ -110,11 +110,20 @@ Write-Log ""
 Flush-ToRelay "Step 0 done"
 
 # =============================================================================
-# Step 1 - Install Python via Miniconda3
+# Step 1 - Install Python via Miniconda3 (si necessaire)
 # =============================================================================
-Write-Log "[1/4] Installing Python $PYTHON_VERSION via Miniconda3..." -Color Yellow
-Write-Log "  (Miniconda uses a simple NSIS installer - no msiexec, no admin needed)" -Color Gray
-Write-Log "  Download: ~85 MB" -Color Gray
+Write-Log "[1/4] Checking Python $PYTHON_VERSION..." -Color Yellow
+
+if (Test-PythonOk $pythonExe) {
+    $ver = & $pythonExe --version 2>&1
+    Write-Log "  Python already installed and working: $ver" -Color Green
+    Write-Log "  tkinter: OK" -Color Green
+    Write-Log "  Skipping Miniconda install." -Color Gray
+} else {
+    Write-Log "  Python not found or broken. Installing via Miniconda3..." -Color Yellow
+    Write-Log "  (Miniconda uses a simple NSIS installer - no msiexec, no admin needed)" -Color Gray
+    Write-Log "  Download: ~85 MB" -Color Gray
+
 
 $instPath = "$env:TEMP\Miniconda3_py311.exe"
 
@@ -160,6 +169,7 @@ try {
     Remove-Item $instPath -ErrorAction SilentlyContinue
     Exit-WithError "Download or install failed: $_"
 }
+} # end else (Python not found)
 
 $env:PYTHONHOME       = $pythonDir
 $env:PYTHONUTF8       = "1"
@@ -181,18 +191,22 @@ Write-Log ""
 Flush-ToRelay "Step 1 done"
 
 # =============================================================================
-# Step 2 - Create virtual environment
+# Step 2 - Create virtual environment (si necessaire)
 # =============================================================================
 Write-Log "[2/4] Setting up virtual environment..." -Color Yellow
-& $pythonExe -X utf8 -m venv $VENV_DIR
-if ($LASTEXITCODE -ne 0) { Exit-WithError "venv creation failed (exit $LASTEXITCODE)." }
-if (-not (Test-Path $venvPython)) { Exit-WithError "venv Python not found at $venvPython" }
-Write-Log "  Virtual environment created." -Color Green
+if (Test-Path $venvPython) {
+    Write-Log "  Venv already exists, skipping creation." -Color Green
+} else {
+    & $pythonExe -X utf8 -m venv $VENV_DIR
+    if ($LASTEXITCODE -ne 0) { Exit-WithError "venv creation failed (exit $LASTEXITCODE)." }
+    if (-not (Test-Path $venvPython)) { Exit-WithError "venv Python not found at $venvPython" }
+    Write-Log "  Virtual environment created." -Color Green
+}
 Write-Log ""
 Flush-ToRelay "Step 2 done"
 
 # =============================================================================
-# Step 3 - Install requirements
+# Step 3 - Install requirements (si necessaire)
 # =============================================================================
 Write-Log "[3/4] Installing dependencies..." -Color Yellow
 if (-not (Test-Path $REQUIREMENTS_FILE)) { Exit-WithError "$REQUIREMENTS_FILE not found!" }
