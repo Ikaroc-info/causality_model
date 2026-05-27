@@ -31,11 +31,16 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # --- Helper ---
+# IMPORTANT: always set PYTHONHOME before testing so Python can find its
+# stdlib regardless of registry state or current working directory.
 function Test-PythonOk {
     param([string]$exe)
     if (-not (Test-Path $exe)) { return $false }
+    $savedHome        = $env:PYTHONHOME
+    $env:PYTHONHOME   = Split-Path $exe
     $ver = & $exe --version 2>&1
     $tk  = & $exe -c "import tkinter; print('ok')" 2>&1
+    $env:PYTHONHOME   = $savedHome
     return ($ver -like "Python 3.*") -and ($tk -like "*ok*")
 }
 
@@ -96,6 +101,18 @@ try {
 
     Remove-Item $rawDir    -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item $nupkgPath            -ErrorAction SilentlyContinue
+
+    # Debug: show what we got from the NuGet package
+    Write-Host "    [DEBUG] Contents of python_env:" -ForegroundColor Gray
+    if (Test-Path $pythonDir) {
+        Get-ChildItem $pythonDir | ForEach-Object { Write-Host "      $($_.Name)" -ForegroundColor Gray }
+    }
+    $env:PYTHONHOME = $pythonDir
+    $dbgVer = & $pythonExe --version 2>&1
+    $dbgTk  = & $pythonExe -c "import tkinter; print('ok')" 2>&1
+    Write-Host "    [DEBUG] python --version : $dbgVer" -ForegroundColor Gray
+    Write-Host "    [DEBUG] tkinter check   : $dbgTk"  -ForegroundColor Gray
+    $env:PYTHONHOME = ""
 
     if (Test-PythonOk $pythonExe) {
         Write-Host "    [Method 1] SUCCESS - Python + tkinter OK." -ForegroundColor Green
