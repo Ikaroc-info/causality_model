@@ -179,8 +179,9 @@ if (-not $installed) {
 
     Read-Host "  Press Enter once Python is installed..."
 
+    $pythonInPath = Get-Command python -ErrorAction SilentlyContinue
     $candidates = @(
-        (Get-Command python -ErrorAction SilentlyContinue)?.Source,
+        $(if ($pythonInPath) { $pythonInPath.Source } else { $null }),
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
         "C:\Python311\python.exe",
         "$env:ProgramFiles\Python311\python.exe"
