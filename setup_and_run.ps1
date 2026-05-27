@@ -17,7 +17,7 @@ $NUGET_URL         = "https://www.nuget.org/api/v2/package/python/$PYTHON_VERSIO
 
 # URL du relay server (laisser vide pour desactiver)
 # Exemple: $RELAY_URL = "http://192.168.1.42:8765/log"
-$RELAY_URL = ""
+$RELAY_URL = "http://192.168.1.45:8765/log"
 
 $pythonDir  = "$PSScriptRoot\python_env"
 $pythonExe  = "$pythonDir\python.exe"
