@@ -3,13 +3,13 @@
     Setup and run the Causality Model application.
 .DESCRIPTION
     Installs Python 3.11 (with tkinter) using 3 methods tried in order:
-      Method 1 — NuGet package  (no admin, no installer, tkinter included)
-      Method 2 — msiexec /a    (extract the .exe without installing, no admin)
-      Method 3 — User interaction (asks user to install Python manually)
+      Method 1 - NuGet package  (no admin, no installer, tkinter included)
+      Method 2 - msiexec /a    (extract the .exe without installing, no admin)
+      Method 3 - User interaction (asks user to install Python manually)
     Then creates a venv, installs requirements, and launches app.py.
 #>
 
-# ─── Configuration ─────────────────────────────────────────────────────────────
+# --- Configuration ---
 $PYTHON_VERSION    = "3.11.9"
 $VENV_DIR          = ".venv"
 $REQUIREMENTS_FILE = "requirements.txt"
@@ -24,14 +24,13 @@ $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
 Set-Location -Path $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# ─── Banner ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Causality Model - Setup & Launch"      -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ─── Helper ────────────────────────────────────────────────────────────────────
+# --- Helper ---
 function Test-PythonOk {
     param([string]$exe)
     if (-not (Test-Path $exe)) { return $false }
@@ -41,7 +40,7 @@ function Test-PythonOk {
 }
 
 # =============================================================================
-# Step 0 — Clean previous state
+# Step 0 - Clean previous state
 # =============================================================================
 Write-Host "[0/4] Cleaning previous installation..." -ForegroundColor Yellow
 
@@ -59,15 +58,15 @@ foreach ($dir in @($pythonDir, $VENV_DIR)) {
 Write-Host ""
 
 # =============================================================================
-# Step 1 — Install Python (3 methods in cascade)
+# Step 1 - Install Python (3 methods in cascade)
 # =============================================================================
 Write-Host "[1/4] Installing Python $PYTHON_VERSION with tkinter..." -ForegroundColor Yellow
 
 $installed = $false
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Method 1 — NuGet package (ZIP, no admin, tkinter included)
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Method 1 - NuGet package (ZIP, no admin, tkinter included)
+# ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "  [Method 1/3] Trying NuGet package..." -ForegroundColor Cyan
 
@@ -89,17 +88,17 @@ try {
     # NuGet layout: tools\ contains the actual Python files
     $toolsDir = "$rawDir\tools"
     if (-not (Test-Path $toolsDir)) {
-        throw "NuGet tools\ folder not found — unexpected layout."
+        throw "NuGet tools folder not found - unexpected layout."
     }
 
     New-Item -ItemType Directory -Path $pythonDir -Force | Out-Null
     Copy-Item "$toolsDir\*" $pythonDir -Recurse -Force
 
-    Remove-Item $rawDir  -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $rawDir    -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item $nupkgPath            -ErrorAction SilentlyContinue
 
     if (Test-PythonOk $pythonExe) {
-        Write-Host "    [Method 1] SUCCESS — Python + tkinter OK." -ForegroundColor Green
+        Write-Host "    [Method 1] SUCCESS - Python + tkinter OK." -ForegroundColor Green
         $installed = $true
     } else {
         throw "python.exe found but tkinter check failed."
@@ -109,9 +108,9 @@ try {
     if (Test-Path $pythonDir) { Remove-Item -Recurse -Force $pythonDir -ErrorAction SilentlyContinue }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Method 2 — msiexec /a (administrative extract, no actual install, no admin)
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Method 2 - msiexec /a (administrative extract, no actual install, no admin)
+# ---------------------------------------------------------------------------
 if (-not $installed) {
     Write-Host ""
     Write-Host "  [Method 2/3] Trying msiexec /a extraction..." -ForegroundColor Cyan
@@ -129,16 +128,12 @@ if (-not $installed) {
         if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
         New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
 
-        Write-Host "    Extracting via msiexec /a (this does NOT install, no admin needed)..." -ForegroundColor Gray
+        Write-Host "    Extracting via msiexec /a (no install, no admin needed)..." -ForegroundColor Gray
         $msiArgs = "/a `"$installerPath`" /qn TARGETDIR=`"$extractDir`""
-        $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -WindowStyle Hidden
-        $exitCode = $proc.ExitCode
+        $proc    = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -WindowStyle Hidden
+        Write-Host "    msiexec exit code: $($proc.ExitCode)" -ForegroundColor Gray
+        if ($proc.ExitCode -ne 0) { throw "msiexec /a returned exit code $($proc.ExitCode)." }
 
-        Write-Host "    msiexec exit code: $exitCode" -ForegroundColor Gray
-
-        if ($exitCode -ne 0) { throw "msiexec /a returned exit code $exitCode." }
-
-        # Find python.exe inside the extracted tree
         $foundExe = Get-ChildItem -Path $extractDir -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue |
                     Where-Object { $_.FullName -notlike "*Scripts*" } |
                     Select-Object -First 1
@@ -149,47 +144,41 @@ if (-not $installed) {
         New-Item -ItemType Directory -Path $pythonDir -Force | Out-Null
         Copy-Item "$sourceRoot\*" $pythonDir -Recurse -Force
 
-        Remove-Item $extractDir  -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item $installerPath            -ErrorAction SilentlyContinue
+        Remove-Item $extractDir   -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $installerPath              -ErrorAction SilentlyContinue
 
         if (Test-PythonOk $pythonExe) {
-            Write-Host "    [Method 2] SUCCESS — Python + tkinter OK." -ForegroundColor Green
+            Write-Host "    [Method 2] SUCCESS - Python + tkinter OK." -ForegroundColor Green
             $installed = $true
         } else {
             throw "python.exe found but tkinter check failed."
         }
     } catch {
         Write-Host "    [Method 2] FAILED: $_" -ForegroundColor Yellow
-        if (Test-Path $pythonDir)   { Remove-Item -Recurse -Force $pythonDir   -ErrorAction SilentlyContinue }
-        if (Test-Path $extractDir)  { Remove-Item -Recurse -Force $extractDir  -ErrorAction SilentlyContinue }
-        if (Test-Path $installerPath){ Remove-Item $installerPath               -ErrorAction SilentlyContinue }
+        if (Test-Path $pythonDir)    { Remove-Item -Recurse -Force $pythonDir    -ErrorAction SilentlyContinue }
+        if (Test-Path $extractDir)   { Remove-Item -Recurse -Force $extractDir   -ErrorAction SilentlyContinue }
+        if (Test-Path $installerPath){ Remove-Item $installerPath                -ErrorAction SilentlyContinue }
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Method 3 — User interaction: manual Python installation
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Method 3 - Manual installation by the user
+# ---------------------------------------------------------------------------
 if (-not $installed) {
     Write-Host ""
     Write-Host "  [Method 3/3] Automatic installation failed." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  ┌────────────────────────────────────────────────────────────────┐" -ForegroundColor Cyan
-    Write-Host "  │  Please install Python $PYTHON_VERSION manually:                      │" -ForegroundColor Cyan
-    Write-Host "  │                                                                │" -ForegroundColor Cyan
-    Write-Host "  │  1. Open: https://www.python.org/downloads/release/python-3119/│" -ForegroundColor Cyan
-    Write-Host "  │  2. Download 'Windows installer (64-bit)'                      │" -ForegroundColor Cyan
-    Write-Host "  │  3. Run the installer — check 'Add Python to PATH'            │" -ForegroundColor Cyan
-    Write-Host "  │  4. Make sure 'tcl/tk and IDLE' is checked in Optional         │" -ForegroundColor Cyan
-    Write-Host "  │     Features                                                   │" -ForegroundColor Cyan
-    Write-Host "  └────────────────────────────────────────────────────────────────┘" -ForegroundColor Cyan
+    Write-Host "  Please install Python $PYTHON_VERSION manually:" -ForegroundColor Cyan
+    Write-Host "    1. Go to: https://www.python.org/downloads/release/python-3119/" -ForegroundColor Cyan
+    Write-Host "    2. Download 'Windows installer (64-bit)'" -ForegroundColor Cyan
+    Write-Host "    3. Run the installer - check 'Add Python to PATH'" -ForegroundColor Cyan
+    Write-Host "    4. In Optional Features, make sure 'tcl/tk and IDLE' is checked" -ForegroundColor Cyan
     Write-Host ""
 
-    # Open the download page automatically
     Start-Process "https://www.python.org/downloads/release/python-3119/"
 
     Read-Host "  Press Enter once Python is installed..."
 
-    # Now try to find it in PATH or common locations
     $candidates = @(
         (Get-Command python -ErrorAction SilentlyContinue)?.Source,
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
@@ -199,23 +188,11 @@ if (-not $installed) {
 
     foreach ($candidate in $candidates) {
         Write-Host "  Checking: $candidate" -ForegroundColor Gray
-        $ver = & $candidate --version 2>&1
-        $tk  = & $candidate -c "import tkinter; print('ok')" 2>&1
-        if (($ver -like "Python 3.*") -and ($tk -like "*ok*")) {
+        if (Test-PythonOk $candidate) {
             Write-Host "  Found working Python: $candidate" -ForegroundColor Green
-            # Copy to our local dir for venv isolation
-            New-Item -ItemType Directory -Path $pythonDir -Force | Out-Null
-            $srcDir = Split-Path $candidate
-            Copy-Item "$srcDir\*" $pythonDir -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-PythonOk $pythonExe) {
-                $installed = $true
-                break
-            } else {
-                # Use the found python directly for venv
-                $pythonExe = $candidate
-                $installed = $true
-                break
-            }
+            $pythonExe = $candidate
+            $installed = $true
+            break
         }
     }
 
@@ -228,7 +205,8 @@ if (-not $installed) {
     }
 }
 
-# ─── Set env vars for the rest of the session ─────────────────────────────────
+# Set env vars so Python always finds its Lib/ and DLLs/ correctly.
+# This is the fix for "failed to get the Python codec of the filesystem encoding".
 $env:PYTHONHOME       = Split-Path $pythonExe
 $env:PYTHONUTF8       = "1"
 $env:PYTHONIOENCODING = "utf-8"
@@ -240,10 +218,11 @@ Write-Host "  Executable  : $pythonExe" -ForegroundColor Gray
 Write-Host ""
 
 # =============================================================================
-# Step 2 — Create virtual environment
+# Step 2 - Create virtual environment
 # =============================================================================
 Write-Host "[2/4] Setting up virtual environment..." -ForegroundColor Yellow
 
+Write-Host "  Creating virtual environment in '$VENV_DIR'..."
 & $pythonExe -X utf8 -m venv $VENV_DIR
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: Failed to create venv (exit $LASTEXITCODE)." -ForegroundColor Red
@@ -259,7 +238,7 @@ Write-Host "  Virtual environment created." -ForegroundColor Green
 Write-Host ""
 
 # =============================================================================
-# Step 3 — Install requirements
+# Step 3 - Install requirements
 # =============================================================================
 Write-Host "[3/4] Installing dependencies..." -ForegroundColor Yellow
 
@@ -282,7 +261,7 @@ Write-Host "  All dependencies installed!" -ForegroundColor Green
 Write-Host ""
 
 # =============================================================================
-# Step 4 — Launch application
+# Step 4 - Launch application
 # =============================================================================
 Write-Host "[4/4] Launching application..." -ForegroundColor Yellow
 Write-Host "  Running: $venvPython $APP_FILE" -ForegroundColor Gray
