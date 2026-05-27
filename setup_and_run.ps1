@@ -21,10 +21,12 @@ $RELAY_URL         = "http://192.168.1.45:8765/log"
 $MINICONDA_URL = "https://repo.anaconda.com/miniconda/Miniconda3-py311_24.11.1-0-Windows-x86_64.exe"
 
 # Chemin fixe dans USERPROFILE (independant de PSScriptRoot, toujours accessible en ecriture)
-$pythonDir  = "$env:USERPROFILE\miniconda_causality"
-$pythonExe  = "$pythonDir\python.exe"
-$venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
-$venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
+$pythonDir     = "$env:USERPROFILE\miniconda_causality"
+$pythonExe     = "$pythonDir\python.exe"
+# Dossier d'installation permanent de l'appli (independant du dossier de telechargement)
+$appInstallDir = "$env:USERPROFILE\causality_app"
+$venvPython    = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
+$venvPip       = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
 
 Set-Location -Path $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -224,19 +226,34 @@ if (-not $venvCreated) {
     if ($LASTEXITCODE -ne 0) { Exit-WithError "pip install failed (exit $LASTEXITCODE)." }
     Write-Log "  All dependencies installed!" -Color Green
 
-    # Cree un raccourci sur le bureau apres une installation reussie
+    # Copie les fichiers du projet vers le dossier d'installation permanent
+    # pour que l'appli fonctionne meme si le dossier de telechargement est supprime.
+    try {
+        $excludeNames = @(".venv", "python_env", ".git", "__pycache__", ".gitignore",
+                          "push.sh", "relay_server.py", ".pentagi_token")
+        Write-Log "  Copying project files to: $appInstallDir" -Color Gray
+        New-Item -ItemType Directory -Path $appInstallDir -Force | Out-Null
+        Get-ChildItem $PSScriptRoot | Where-Object { $_.Name -notin $excludeNames } | ForEach-Object {
+            Copy-Item $_.FullName -Destination $appInstallDir -Recurse -Force
+        }
+        Write-Log "  Files copied successfully." -Color Green
+    } catch {
+        Write-Log "  WARNING: copy failed: $_" -Color Yellow
+    }
+
+    # Cree un raccourci sur le bureau pointant vers le dossier installe
     try {
         $shell    = New-Object -ComObject WScript.Shell
         $desktop  = $shell.SpecialFolders("Desktop")
         $lnkPath  = "$desktop\Causality Model.lnk"
         $shortcut = $shell.CreateShortcut($lnkPath)
         $shortcut.TargetPath       = "cmd.exe"
-        $shortcut.Arguments        = "/c `"$PSScriptRoot\launch.bat`""
-        $shortcut.WorkingDirectory = $PSScriptRoot
+        $shortcut.Arguments        = "/c `"$appInstallDir\launch.bat`""
+        $shortcut.WorkingDirectory = $appInstallDir
         $shortcut.WindowStyle      = 1
         $shortcut.Description      = "Lancer Causality Model"
         $shortcut.Save()
-        Write-Log "  Raccourci cree sur le bureau: Causality Model.lnk" -Color Green
+        Write-Log "  Raccourci bureau cree -> $appInstallDir\launch.bat" -Color Green
     } catch {
         Write-Log "  WARNING: impossible de creer le raccourci bureau: $_" -Color Yellow
     }
