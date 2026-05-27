@@ -3,7 +3,7 @@
     Setup and run the Causality Model application.
 .DESCRIPTION
     Method 1: NuGet Python (has Lib/) + tkinter extracted from official installer /layout
-    Method 2: Ask user to install Python manually
+    Errors are POSTed to a relay server if RELAY_URL is configured.
 #>
 
 # --- Configuration ---
@@ -14,6 +14,11 @@ $APP_FILE          = "app.py"
 $INSTALLER_NAME    = "python-$PYTHON_VERSION-amd64.exe"
 $INSTALLER_URL     = "https://www.python.org/ftp/python/$PYTHON_VERSION/$INSTALLER_NAME"
 $NUGET_URL         = "https://www.nuget.org/api/v2/package/python/$PYTHON_VERSION"
+
+# --- Relay server (optional) ---
+# Set this to your server IP to receive error logs remotely.
+# Leave empty to disable.  Example: "http://192.168.1.10:5000"
+$RELAY_URL = ""
 
 $pythonDir  = "$PSScriptRoot\python_env"
 $pythonExe  = "$pythonDir\python.exe"
@@ -39,6 +44,18 @@ function Test-PythonOk {
     $tk  = & $exe -c "import tkinter; print('ok')" 2>&1
     $env:PYTHONHOME = $saved
     return ($ver -like "Python 3.*") -and ($tk -like "*ok*")
+}
+
+# Helper: POST a message to the relay server (silently ignored if no server)
+function Send-ToRelay {
+    param([string]$msg)
+    if (-not $RELAY_URL) { return }
+    try {
+        $body    = [System.Text.Encoding]::UTF8.GetBytes($msg)
+        $headers = @{ "X-Source" = $env:COMPUTERNAME }
+        Invoke-WebRequest -Uri "$RELAY_URL/log" -Method POST -Body $body `
+                          -Headers $headers -UseBasicParsing -TimeoutSec 3 | Out-Null
+    } catch { }
 }
 
 # =============================================================================
@@ -186,16 +203,19 @@ try {
         throw "tkinter still not working after supplement."
     }
 } catch {
-    Write-Host "    [Method 1] FAILED: $_" -ForegroundColor Yellow
+    $errMsg = "[Method 1] FAILED: $_"
+    Write-Host "    $errMsg" -ForegroundColor Yellow
+    Send-ToRelay "[INSTALL ERROR] $env:COMPUTERNAME`n$errMsg"
     foreach ($d in @($pythonDir,$rawDir,$layoutDir,$tclExtract,$instPath)) {
         if ($d -and (Test-Path $d)) { Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue }
     }
 }
 
 if (-not $installed) {
+    $msg = "ERROR: Automatic Python installation failed on $env:COMPUTERNAME. Check internet connection."
     Write-Host ""
-    Write-Host "  ERROR: Automatic Python installation failed." -ForegroundColor Red
-    Write-Host "  Please check your internet connection and re-run launch.bat." -ForegroundColor Yellow
+    Write-Host "  $msg" -ForegroundColor Red
+    Send-ToRelay $msg
     Read-Host "Press Enter to exit"; exit 1
 }
 
@@ -213,7 +233,9 @@ Write-Host ""
 Write-Host "[2/4] Setting up virtual environment..." -ForegroundColor Yellow
 & $pythonExe -X utf8 -m venv $VENV_DIR
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  ERROR: venv creation failed (exit $LASTEXITCODE)." -ForegroundColor Red
+    $msg = "ERROR: venv creation failed (exit $LASTEXITCODE) on $env:COMPUTERNAME."
+    Write-Host "  $msg" -ForegroundColor Red
+    Send-ToRelay $msg
     Read-Host "Press Enter to exit"; exit 1
 }
 if (-not (Test-Path $venvPython)) {
@@ -236,7 +258,9 @@ Write-Host "  Upgrading pip..." -ForegroundColor Gray
 Write-Host "  Installing packages (may take a few minutes)..." -ForegroundColor Gray
 & $venvPip install -r $REQUIREMENTS_FILE
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  ERROR: Failed to install dependencies." -ForegroundColor Red
+    $msg = "ERROR: Failed to install dependencies on $env:COMPUTERNAME."
+    Write-Host "  $msg" -ForegroundColor Red
+    Send-ToRelay $msg
     Read-Host "Press Enter to exit"; exit 1
 }
 Write-Host "  All dependencies installed!" -ForegroundColor Green
