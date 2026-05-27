@@ -2,8 +2,9 @@
 .SYNOPSIS
     Setup and run the Causality Model application.
 .DESCRIPTION
-    Method 1: NuGet Python (has Lib/) + tkinter extracted from official installer /layout
-    Si RELAY_URL est defini, tous les messages du terminal sont aussi envoyes en POST.
+    Installe Python 3.11 via le .exe officiel (chemin user par defaut, sans admin),
+    poll jusqu'a completion reelle, puis cree un venv et lance app.py.
+    Si RELAY_URL est defini, tous les logs sont aussi envoyes en POST.
 #>
 
 # --- Configuration ---
@@ -13,13 +14,14 @@ $REQUIREMENTS_FILE = "requirements.txt"
 $APP_FILE          = "app.py"
 $INSTALLER_NAME    = "python-$PYTHON_VERSION-amd64.exe"
 $INSTALLER_URL     = "https://www.python.org/ftp/python/$PYTHON_VERSION/$INSTALLER_NAME"
-$NUGET_URL         = "https://www.nuget.org/api/v2/package/python/$PYTHON_VERSION"
 
 # URL du relay server (laisser vide pour desactiver)
 # Exemple: $RELAY_URL = "http://192.168.1.42:8765/log"
 $RELAY_URL = "http://192.168.1.45:8765/log"
 
-$pythonDir  = "$PSScriptRoot\python_env"
+# Python s'installe dans le chemin user par defaut (pas de TargetDir custom)
+# Cela evite le bug ou Lib/ est absent apres install avec TargetDir personnalise
+$pythonDir  = "$env:LOCALAPPDATA\Programs\Python\Python311"
 $pythonExe  = "$pythonDir\python.exe"
 $venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
 $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
@@ -30,15 +32,10 @@ Set-Location -Path $PSScriptRoot
 # =============================================================================
 # Helpers
 # =============================================================================
-
-# Buffer de tous les messages pour envoi groupé au relay
 $script:logBuffer = [System.Collections.Generic.List[string]]::new()
 
 function Write-Log {
-    param(
-        [string]$msg = "",
-        [string]$Color = "White"
-    )
+    param([string]$msg = "", [string]$Color = "White")
     Write-Host $msg -ForegroundColor $Color
     $script:logBuffer.Add($msg)
 }
@@ -87,153 +84,112 @@ Write-Log ""
 # Step 0 - Clean
 # =============================================================================
 Write-Log "[0/4] Cleaning previous installation..." -Color Yellow
-foreach ($d in @($pythonDir, $VENV_DIR)) {
-    if (Test-Path $d) {
-        Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
-        Write-Log "  Removed: $d" -Color Gray
+
+# Supprime le Python precedemment installe (chemin user)
+if (Test-Path $pythonDir) {
+    Write-Log "  Removing previous Python dir: $pythonDir" -Color Gray
+    Remove-Item -Recurse -Force $pythonDir -ErrorAction SilentlyContinue
+    if (Test-Path $pythonDir) {
+        Write-Log "  WARNING: could not fully remove Python dir." -Color Yellow
+    } else {
+        Write-Log "  Removed." -Color Green
     }
 }
+
+# Supprime le venv
+if (Test-Path $VENV_DIR) {
+    Write-Log "  Removing previous .venv..." -Color Gray
+    Remove-Item -Recurse -Force $VENV_DIR -ErrorAction SilentlyContinue
+    if (-not (Test-Path $VENV_DIR)) { Write-Log "  Removed." -Color Green }
+}
+
 Write-Log ""
 Flush-ToRelay "Step 0 done"
 
 # =============================================================================
-# Step 1 - Install Python
+# Step 1 - Install Python 3.11 (chemin user par defaut, sans TargetDir custom)
 # =============================================================================
-Write-Log "[1/4] Installing Python $PYTHON_VERSION with tkinter..." -Color Yellow
-Write-Log "  [Method 1] NuGet + installer tkinter supplement..." -Color Cyan
+Write-Log "[1/4] Installing Python $PYTHON_VERSION..." -Color Yellow
 
-$nupkgPath  = "$env:TEMP\python_nuget.zip"
-$rawDir     = "$env:TEMP\python_nuget_raw"
-$layoutDir  = "$env:TEMP\python_layout"
-$tclExtract = "$env:TEMP\tcltk_extract"
-$instPath   = "$env:TEMP\$INSTALLER_NAME"
-$installed  = $false
+$instPath = "$env:TEMP\$INSTALLER_NAME"
 
 try {
-    # --- Part A: NuGet base Python ---
-    Write-Log "    Downloading NuGet Python (~17 MB)..." -Color Gray
-    Invoke-WebRequest -Uri $NUGET_URL -OutFile $nupkgPath -UseBasicParsing
-    if (Test-Path $rawDir) { Remove-Item -Recurse -Force $rawDir }
-    Expand-Archive -Path $nupkgPath -DestinationPath $rawDir -Force
-    Remove-Item $nupkgPath -ErrorAction SilentlyContinue
-
-    $toolsDir = "$rawDir\tools"
-    if (-not (Test-Path $toolsDir)) { throw "NuGet: tools/ not found in package." }
-
-    New-Item -ItemType Directory -Path $pythonDir -Force | Out-Null
-    Copy-Item "$toolsDir\*" $pythonDir -Recurse -Force
-    Remove-Item $rawDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Log "    NuGet base extracted." -Color Gray
-
-    # --- Part B: Download installer and run /layout ---
-    Write-Log "    Downloading installer for tkinter extraction (~25 MB)..." -Color Gray
+    Write-Log "  Downloading installer (~25 MB)..." -Color Gray
     Invoke-WebRequest -Uri $INSTALLER_URL -OutFile $instPath -UseBasicParsing
-    if (Test-Path $layoutDir) { Remove-Item -Recurse -Force $layoutDir }
-    New-Item -ItemType Directory -Path $layoutDir -Force | Out-Null
+    $sizeMB = [math]::Round((Get-Item $instPath).Length / 1MB, 1)
+    Write-Log "  Download complete ($sizeMB MB)." -Color Gray
 
-    Write-Log "    Running /layout to extract component MSIs (no install)..." -Color Gray
-    $proc = Start-Process -FilePath $instPath -ArgumentList "/layout `"$layoutDir`" /quiet" -Wait -PassThru -WindowStyle Hidden
+    # Installer sans TargetDir custom = chemin par defaut qui fonctionne correctement.
+    # Include_tcltk=1 garantit tkinter.
+    # On NE PAS mettre de TargetDir ici — c'est ce qui causait l'absence de Lib/.
+    $installArgs = @(
+        "/quiet", "/norestart",
+        "InstallAllUsers=0",
+        "PrependPath=0",
+        "Include_test=0",
+        "Include_launcher=0",
+        "Include_doc=0",
+        "Include_tcltk=1"
+    )
+
+    Write-Log "  Starting installer (silent, user install)..." -Color Gray
+    Write-Log "  Install dir will be: $pythonDir" -Color Gray
+    $proc = Start-Process -FilePath $instPath -ArgumentList $installArgs -WindowStyle Hidden -PassThru
+
+    # Poll jusqu'a ce que Lib\os.py apparaisse = installation reellement terminee.
+    # Le bootstrapper peut se terminer avant que msiexec finisse, d'ou le poll.
+    Write-Log "  Waiting for installation to complete (polling Lib\os.py)..." -Color Gray
+    $timeoutSec = 300
+    $elapsed    = 0
+    $ready      = $false
+    while ($elapsed -lt $timeoutSec) {
+        Start-Sleep -Seconds 4
+        $elapsed += 4
+        if (Test-Path "$pythonDir\Lib\os.py") {
+            $ready = $true
+            Write-Log "  Installation complete! ($elapsed s)" -Color Green
+            break
+        }
+        if ($elapsed % 20 -eq 0) {
+            Write-Log "  Still waiting... ($elapsed / $timeoutSec s)" -Color Gray
+        }
+    }
+
     Remove-Item $instPath -ErrorAction SilentlyContinue
-    Write-Log "    Layout exit code: $($proc.ExitCode)" -Color Gray
 
-    # --- Part C: Find and extract tcltk MSI ---
-    Write-Log "    MSIs in layout:" -Color Gray
-    Get-ChildItem $layoutDir -Filter "*.msi" | ForEach-Object { Write-Log "      $($_.Name)" -Color Gray }
-
-    $tclMsi = Get-ChildItem $layoutDir -Filter "*.msi" |
-              Where-Object { $_.Name -match "tcl|tk" -and $_.Name -notmatch "_d\.msi" } |
-              Select-Object -First 1
-    if (-not $tclMsi) {
-        $tclMsi = Get-ChildItem $layoutDir -Filter "*.msi" |
-                  Where-Object { $_.Name -match "tcl|tk" } |
-                  Select-Object -First 1
-    }
-    if (-not $tclMsi) { throw "Could not find tcltk MSI in layout." }
-    Write-Log "    Extracting MSI: $($tclMsi.Name)" -Color Gray
-
-    if (Test-Path $tclExtract) { Remove-Item -Recurse -Force $tclExtract }
-    New-Item -ItemType Directory -Path $tclExtract -Force | Out-Null
-    $msiProc = Start-Process "msiexec.exe" -ArgumentList "/a `"$($tclMsi.FullName)`" /qn TARGETDIR=`"$tclExtract`"" -Wait -PassThru -WindowStyle Hidden
-    Write-Log "    msiexec /a exit code: $($msiProc.ExitCode)" -Color Gray
-
-    # --- Part D: Show extract contents ---
-    Write-Log "    Files extracted from MSI (top level):" -Color Gray
-    if (Test-Path $tclExtract) {
-        Get-ChildItem $tclExtract | ForEach-Object { Write-Log "      $($_.Name)" -Color Gray }
+    if (-not $ready) {
+        Exit-WithError "Timeout: Lib\os.py not found after $timeoutSec s. Installation may have failed."
     }
 
-    # --- Part E: Copy tkinter files into pythonDir ---
-    $tkPyd = Get-ChildItem $tclExtract -Filter "_tkinter.pyd" -Recurse | Select-Object -First 1
-    if ($tkPyd) {
-        Copy-Item $tkPyd.FullName "$pythonDir\DLLs\" -Force
-        Write-Log "    Copied: _tkinter.pyd" -Color Gray
-    } else {
-        Write-Log "    WARNING: _tkinter.pyd not found in extract" -Color Yellow
-    }
+    # Contenu du dossier pour debug
+    Write-Log "  Contents of $pythonDir :" -Color Gray
+    Get-ChildItem $pythonDir | ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
 
-    $tclDlls = Get-ChildItem $tclExtract -Recurse -Filter "tcl*.dll"
-    $tkDlls  = Get-ChildItem $tclExtract -Recurse -Filter "tk*.dll"
-    $tclDlls | ForEach-Object { Copy-Item $_.FullName $pythonDir -Force; Write-Log "    Copied: $($_.Name)" -Color Gray }
-    $tkDlls  | ForEach-Object { Copy-Item $_.FullName $pythonDir -Force; Write-Log "    Copied: $($_.Name)" -Color Gray }
-
-    foreach ($sub in @("tcl", "tk")) {
-        $src = Get-ChildItem $tclExtract -Directory -Recurse -Filter $sub | Select-Object -First 1
-        if ($src) {
-            Copy-Item $src.FullName -Destination $pythonDir -Recurse -Force
-            Write-Log "    Copied dir: $sub/" -Color Gray
-        } else {
-            Write-Log "    WARNING: $sub/ dir not found in extract" -Color Yellow
-        }
-    }
-
-    $tkLib = Get-ChildItem $tclExtract -Directory -Recurse -Filter "tkinter" | Select-Object -First 1
-    if ($tkLib) {
-        $dest = "$pythonDir\Lib\tkinter"
-        Copy-Item $tkLib.FullName -Destination $dest -Recurse -Force
-        Write-Log "    Copied: Lib/tkinter/" -Color Gray
-    } else {
-        Write-Log "    WARNING: Lib/tkinter/ not found in extract" -Color Yellow
-        if (Test-Path "$pythonDir\Lib\tkinter") {
-            Write-Log "    OK: Lib/tkinter/ already present from NuGet" -Color Green
-        }
-    }
-
-    Remove-Item $tclExtract -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item $layoutDir  -Recurse -Force -ErrorAction SilentlyContinue
-
-    if (Test-PythonOk $pythonExe) {
-        Write-Log "    [Method 1] SUCCESS - Python + tkinter OK." -Color Green
-        $installed = $true
-    } else {
-        $env:PYTHONHOME = $pythonDir
-        $dbgVer = & $pythonExe --version 2>&1
-        $dbgTk  = & $pythonExe -c "import tkinter; print('ok')" 2>&1
-        $env:PYTHONHOME = ""
-        Write-Log "    [DEBUG] ver: $dbgVer" -Color Gray
-        Write-Log "    [DEBUG] tk : $dbgTk"  -Color Gray
-        throw "tkinter still not working after supplement."
-    }
 } catch {
-    Write-Log "    [Method 1] FAILED: $_" -Color Yellow
-    foreach ($d in @($pythonDir,$rawDir,$layoutDir,$tclExtract,$instPath)) {
-        if ($d -and (Test-Path $d)) { Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue }
-    }
+    Remove-Item $instPath -ErrorAction SilentlyContinue
+    Exit-WithError "Installer download or launch failed: $_"
 }
 
-Flush-ToRelay "Step 1"
-
-if (-not $installed) {
-    Exit-WithError "Automatic Python installation failed. Check internet connection and re-run launch.bat."
-}
-
-# Set PYTHONHOME for the rest of the session
-$env:PYTHONHOME       = Split-Path $pythonExe
+# Set PYTHONHOME so Python always finds its stdlib
+$env:PYTHONHOME       = $pythonDir
 $env:PYTHONUTF8       = "1"
 $env:PYTHONIOENCODING = "utf-8"
-$ver = & $pythonExe --version 2>&1
-Write-Log "  Python ready: $ver" -Color Green
-Write-Log "  Executable  : $pythonExe" -Color Gray
+
+# Verify python + tkinter
+if (Test-PythonOk $pythonExe) {
+    $ver = & $pythonExe --version 2>&1
+    Write-Log "  Python: $ver" -Color Green
+    Write-Log "  tkinter: OK" -Color Green
+} else {
+    $ver  = & $pythonExe --version 2>&1
+    $tkOk = & $pythonExe -c "import tkinter; print('ok')" 2>&1
+    Write-Log "  [DEBUG] ver : $ver"  -Color Gray
+    Write-Log "  [DEBUG] tk  : $tkOk" -Color Gray
+    Exit-WithError "Python or tkinter check failed after install."
+}
+
 Write-Log ""
+Flush-ToRelay "Step 1 done"
 
 # =============================================================================
 # Step 2 - Create virtual environment
@@ -245,7 +201,7 @@ if ($LASTEXITCODE -ne 0) { Exit-WithError "venv creation failed (exit $LASTEXITC
 if (-not (Test-Path $venvPython)) { Exit-WithError "venv Python not found at $venvPython" }
 Write-Log "  Virtual environment created." -Color Green
 Write-Log ""
-Flush-ToRelay "Step 2"
+Flush-ToRelay "Step 2 done"
 
 # =============================================================================
 # Step 3 - Install requirements
@@ -261,7 +217,7 @@ Write-Log "  Installing packages (may take a few minutes)..." -Color Gray
 if ($LASTEXITCODE -ne 0) { Exit-WithError "pip install failed (exit $LASTEXITCODE)." }
 Write-Log "  All dependencies installed!" -Color Green
 Write-Log ""
-Flush-ToRelay "Step 3"
+Flush-ToRelay "Step 3 done"
 
 # =============================================================================
 # Step 4 - Launch application
