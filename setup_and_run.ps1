@@ -3,6 +3,7 @@
     Setup and run the Causality Model application.
 .DESCRIPTION
     This script:
+    0. Cleans up any previous Python local install and .venv to ensure a fresh state
     1. Downloads Python 3.11 from python.org and installs it locally (no admin required)
     2. Creates a virtual environment (.venv)
     3. Installs requirements from requirements.txt
@@ -50,8 +51,47 @@ $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
 $env:PYTHONUTF8        = "1"
 $env:PYTHONIOENCODING  = "utf-8"
 
-# --- Step 1: Find or install Python 3.11 ---
-Write-Host "[1/4] Preparing Python $PYTHON_VERSION..." -ForegroundColor Yellow
+# --- Step 0: Clean previous install to guarantee a fresh, uncorrupted state ---
+Write-Host "[0/4] Cleaning previous installation..." -ForegroundColor Yellow
+
+# Remove the local Python directory (if it exists)
+if (Test-Path $pythonDir) {
+    Write-Host "  Removing existing Python dir: $pythonDir" -ForegroundColor Gray
+    Remove-Item -Recurse -Force $pythonDir -ErrorAction SilentlyContinue
+    if (Test-Path $pythonDir) {
+        Write-Host "  WARNING: could not fully remove '$pythonDir' (files may be in use)." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Python dir removed." -ForegroundColor Green
+    }
+} else {
+    Write-Host "  No previous Python dir found, skipping." -ForegroundColor Gray
+}
+
+# Also clean the legacy AppData path in case a previous version installed there
+$legacyDir = "$localAppData\Programs\CausalityModelPython"
+if (($legacyDir -ne $pythonDir) -and (Test-Path $legacyDir)) {
+    Write-Host "  Removing legacy Python dir: $legacyDir" -ForegroundColor Gray
+    Remove-Item -Recurse -Force $legacyDir -ErrorAction SilentlyContinue
+}
+
+# Remove the virtual environment
+if (Test-Path $VENV_DIR) {
+    Write-Host "  Removing existing .venv..." -ForegroundColor Gray
+    Remove-Item -Recurse -Force $VENV_DIR -ErrorAction SilentlyContinue
+    if (Test-Path $VENV_DIR) {
+        Write-Host "  WARNING: could not fully remove '$VENV_DIR' (files may be in use)." -ForegroundColor Yellow
+    } else {
+        Write-Host "  .venv removed." -ForegroundColor Green
+    }
+} else {
+    Write-Host "  No previous .venv found, skipping." -ForegroundColor Gray
+}
+
+Write-Host "  Cleanup done." -ForegroundColor Green
+Write-Host ""
+
+# --- Step 1: Install Python 3.11 ---
+Write-Host "[1/4] Installing Python $PYTHON_VERSION..." -ForegroundColor Yellow
 
 # 1a. Check the Windows registry: the Python installer always registers itself
 #     under HKCU:\Software\Python\PythonCore\<version>\InstallPath.
