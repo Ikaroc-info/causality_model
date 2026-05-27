@@ -98,43 +98,75 @@ try {
     Write-Host "    Layout exit code: $($proc.ExitCode)" -ForegroundColor Gray
 
     # --- Part C: Find and extract tcltk MSI ---
+    # List all MSIs for visibility
+    Write-Host "    MSIs in layout:" -ForegroundColor Gray
+    Get-ChildItem $layoutDir -Filter "*.msi" | ForEach-Object { Write-Host "      $($_.Name)" -ForegroundColor Gray }
+
+    # Prefer non-debug release MSI (exclude _d.msi debug builds)
     $tclMsi = Get-ChildItem $layoutDir -Filter "*.msi" |
-              Where-Object { $_.Name -match "tcl|tk" } |
+              Where-Object { $_.Name -match "tcl|tk" -and $_.Name -notmatch "_d\.msi" } |
               Select-Object -First 1
 
+    # Fallback: accept debug if no release found
     if (-not $tclMsi) {
-        Write-Host "    MSIs found in layout:" -ForegroundColor Gray
-        Get-ChildItem $layoutDir -Filter "*.msi" | ForEach-Object { Write-Host "      $($_.Name)" -ForegroundColor Gray }
-        throw "Could not find tcltk MSI in layout."
+        $tclMsi = Get-ChildItem $layoutDir -Filter "*.msi" |
+                  Where-Object { $_.Name -match "tcl|tk" } |
+                  Select-Object -First 1
     }
-    Write-Host "    Found tkinter MSI: $($tclMsi.Name)" -ForegroundColor Gray
+
+    if (-not $tclMsi) { throw "Could not find tcltk MSI in layout." }
+    Write-Host "    Extracting MSI: $($tclMsi.Name)" -ForegroundColor Gray
 
     if (Test-Path $tclExtract) { Remove-Item -Recurse -Force $tclExtract }
     New-Item -ItemType Directory -Path $tclExtract -Force | Out-Null
     $msiProc = Start-Process "msiexec.exe" -ArgumentList "/a `"$($tclMsi.FullName)`" /qn TARGETDIR=`"$tclExtract`"" -Wait -PassThru -WindowStyle Hidden
     Write-Host "    msiexec /a exit code: $($msiProc.ExitCode)" -ForegroundColor Gray
 
-    # --- Part D: Copy tkinter files into pythonDir ---
+    # --- Part D: Debug - show what was extracted ---
+    Write-Host "    Files extracted from MSI (top level):" -ForegroundColor Gray
+    if (Test-Path $tclExtract) {
+        Get-ChildItem $tclExtract | ForEach-Object { Write-Host "      $($_.Name)" -ForegroundColor Gray }
+    }
+
+    # --- Part E: Copy tkinter files into pythonDir ---
     # _tkinter.pyd
     $tkPyd = Get-ChildItem $tclExtract -Filter "_tkinter.pyd" -Recurse | Select-Object -First 1
-    if ($tkPyd) { Copy-Item $tkPyd.FullName "$pythonDir\DLLs\" -Force; Write-Host "    Copied _tkinter.pyd" -ForegroundColor Gray }
+    if ($tkPyd) {
+        Copy-Item $tkPyd.FullName "$pythonDir\DLLs\" -Force
+        Write-Host "    Copied: _tkinter.pyd" -ForegroundColor Gray
+    } else {
+        Write-Host "    WARNING: _tkinter.pyd not found in extract" -ForegroundColor Yellow
+    }
 
     # Tcl/Tk runtime DLLs
-    Get-ChildItem $tclExtract -Recurse -Filter "tcl*.dll" | ForEach-Object { Copy-Item $_.FullName $pythonDir -Force }
-    Get-ChildItem $tclExtract -Recurse -Filter "tk*.dll"  | ForEach-Object { Copy-Item $_.FullName $pythonDir -Force }
+    $tclDlls = Get-ChildItem $tclExtract -Recurse -Filter "tcl*.dll"
+    $tkDlls  = Get-ChildItem $tclExtract -Recurse -Filter "tk*.dll"
+    $tclDlls | ForEach-Object { Copy-Item $_.FullName $pythonDir -Force; Write-Host "    Copied: $($_.Name)" -ForegroundColor Gray }
+    $tkDlls  | ForEach-Object { Copy-Item $_.FullName $pythonDir -Force; Write-Host "    Copied: $($_.Name)" -ForegroundColor Gray }
 
     # tcl/ and tk/ runtime dirs
     foreach ($sub in @("tcl", "tk")) {
         $src = Get-ChildItem $tclExtract -Directory -Recurse -Filter $sub | Select-Object -First 1
-        if ($src) { Copy-Item $src.FullName -Destination $pythonDir -Recurse -Force }
+        if ($src) {
+            Copy-Item $src.FullName -Destination $pythonDir -Recurse -Force
+            Write-Host "    Copied dir: $sub/" -ForegroundColor Gray
+        } else {
+            Write-Host "    WARNING: $sub/ dir not found in extract" -ForegroundColor Yellow
+        }
     }
 
     # Lib/tkinter Python package
     $tkLib = Get-ChildItem $tclExtract -Directory -Recurse -Filter "tkinter" | Select-Object -First 1
     if ($tkLib) {
         $dest = "$pythonDir\Lib\tkinter"
-        if (-not (Test-Path $dest)) { Copy-Item $tkLib.FullName -Destination $dest -Recurse -Force }
-        Write-Host "    Copied Lib/tkinter/" -ForegroundColor Gray
+        Copy-Item $tkLib.FullName -Destination $dest -Recurse -Force
+        Write-Host "    Copied: Lib/tkinter/" -ForegroundColor Gray
+    } else {
+        Write-Host "    WARNING: Lib/tkinter/ not found in extract" -ForegroundColor Yellow
+        # Fallback: check if it's already in the NuGet Lib/
+        if (Test-Path "$pythonDir\Lib\tkinter") {
+            Write-Host "    OK: Lib/tkinter/ already present from NuGet" -ForegroundColor Green
+        }
     }
 
     Remove-Item $tclExtract -Recurse -Force -ErrorAction SilentlyContinue
