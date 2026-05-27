@@ -227,37 +227,46 @@ if (-not $venvCreated) {
     Write-Log "  All dependencies installed!" -Color Green
 
     # Copie les fichiers du projet vers le dossier d'installation permanent
-    # pour que l'appli fonctionne meme si le dossier de telechargement est supprime.
-    try {
-        $excludeNames = @(".venv", "python_env", ".git", "__pycache__", ".gitignore",
-                          "push.sh", "relay_server.py", ".pentagi_token")
-        Write-Log "  Copying project files to: $appInstallDir" -Color Gray
-        New-Item -ItemType Directory -Path $appInstallDir -Force | Out-Null
-        Get-ChildItem $PSScriptRoot | Where-Object { $_.Name -notin $excludeNames } | ForEach-Object {
-            Copy-Item $_.FullName -Destination $appInstallDir -Recurse -Force
+    # seulement si le dossier n'existe pas encore (premiere installation).
+    if (Test-Path "$appInstallDir\app.py") {
+        Write-Log "  Install dir already populated, skipping copy." -Color Gray
+    } else {
+        try {
+            $excludeNames = @(".venv", "python_env", ".git", "__pycache__", ".gitignore",
+                              "push.sh", "relay_server.py", ".pentagi_token")
+            Write-Log "  Copying project files to: $appInstallDir" -Color Gray
+            New-Item -ItemType Directory -Path $appInstallDir -Force | Out-Null
+            Get-ChildItem $PSScriptRoot | Where-Object { $_.Name -notin $excludeNames } | ForEach-Object {
+                Copy-Item $_.FullName -Destination $appInstallDir -Recurse -Force
+            }
+            Write-Log "  Files copied successfully." -Color Green
+        } catch {
+            Write-Log "  WARNING: copy failed: $_" -Color Yellow
         }
-        Write-Log "  Files copied successfully." -Color Green
-    } catch {
-        Write-Log "  WARNING: copy failed: $_" -Color Yellow
     }
 
-    # Cree un raccourci sur le bureau pointant vers le dossier installe
+    # Cree un raccourci sur le bureau seulement s'il n'existe pas encore.
     try {
         $shell    = New-Object -ComObject WScript.Shell
         $desktop  = $shell.SpecialFolders("Desktop")
         $lnkPath  = "$desktop\Causality Model.lnk"
-        $shortcut = $shell.CreateShortcut($lnkPath)
-        $shortcut.TargetPath       = "cmd.exe"
-        $shortcut.Arguments        = "/c `"$appInstallDir\launch.bat`""
-        $shortcut.WorkingDirectory = $appInstallDir
-        $shortcut.WindowStyle      = 1
-        $shortcut.Description      = "Lancer Causality Model"
-        $shortcut.Save()
-        Write-Log "  Raccourci bureau cree -> $appInstallDir\launch.bat" -Color Green
+        if (Test-Path $lnkPath) {
+            Write-Log "  Raccourci bureau deja present, skip." -Color Gray
+        } else {
+            $shortcut = $shell.CreateShortcut($lnkPath)
+            $shortcut.TargetPath       = "cmd.exe"
+            $shortcut.Arguments        = "/c `"$appInstallDir\launch.bat`""
+            $shortcut.WorkingDirectory = $appInstallDir
+            $shortcut.WindowStyle      = 1
+            $shortcut.Description      = "Lancer Causality Model"
+            $shortcut.Save()
+            Write-Log "  Raccourci bureau cree -> $appInstallDir\launch.bat" -Color Green
+        }
     } catch {
         Write-Log "  WARNING: impossible de creer le raccourci bureau: $_" -Color Yellow
     }
 }
+
 Write-Log ""
 Flush-ToRelay "Step 3 done"
 
