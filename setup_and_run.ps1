@@ -25,8 +25,12 @@ $pythonDir     = "$env:USERPROFILE\miniconda_causality"
 $pythonExe     = "$pythonDir\python.exe"
 # Dossier d'installation permanent de l'appli (independant du dossier de telechargement)
 $appInstallDir = "$env:USERPROFILE\causality_app"
-$venvPython    = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
-$venvPip       = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
+# Le venv est dans appInstallDir (pas dans PSScriptRoot) pour que le raccourci bureau
+# le trouve sans avoir a le recreer apres la premiere installation.
+$venvDir    = "$appInstallDir\.venv"
+$venvPython = "$venvDir\Scripts\python.exe"
+$venvPip    = "$venvDir\Scripts\pip.exe"
+
 
 Set-Location -Path $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -94,7 +98,7 @@ Write-Log ""
 if ($Clean) {
     Write-Log "[0/4] Cleaning previous installation..." -Color Yellow
 
-    foreach ($d in @($pythonDir, $VENV_DIR, $appInstallDir)) {
+    foreach ($d in @($pythonDir, $venvDir, $appInstallDir)) {
         if (Test-Path $d) {
             Write-Log "  Removing: $d" -Color Gray
             Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
@@ -215,7 +219,9 @@ $venvCreated = $false
 if (Test-Path $venvPython) {
     Write-Log "  Venv already exists, skipping creation." -Color Green
 } else {
-    & $pythonExe -X utf8 -m venv $VENV_DIR
+    Write-Log "  Creating venv at: $venvDir" -Color Gray
+    New-Item -ItemType Directory -Path $appInstallDir -Force | Out-Null
+    & $pythonExe -X utf8 -m venv $venvDir
     if ($LASTEXITCODE -ne 0) { Exit-WithError "venv creation failed (exit $LASTEXITCODE)." }
     if (-not (Test-Path $venvPython)) { Exit-WithError "venv Python not found at $venvPython" }
     Write-Log "  Virtual environment created." -Color Green
