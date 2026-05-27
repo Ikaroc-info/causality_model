@@ -194,6 +194,7 @@ Flush-ToRelay "Step 1 done"
 # Step 2 - Create virtual environment (si necessaire)
 # =============================================================================
 Write-Log "[2/4] Setting up virtual environment..." -Color Yellow
+$venvCreated = $false
 if (Test-Path $venvPython) {
     Write-Log "  Venv already exists, skipping creation." -Color Green
 } else {
@@ -201,6 +202,7 @@ if (Test-Path $venvPython) {
     if ($LASTEXITCODE -ne 0) { Exit-WithError "venv creation failed (exit $LASTEXITCODE)." }
     if (-not (Test-Path $venvPython)) { Exit-WithError "venv Python not found at $venvPython" }
     Write-Log "  Virtual environment created." -Color Green
+    $venvCreated = $true
 }
 Write-Log ""
 Flush-ToRelay "Step 2 done"
@@ -211,15 +213,20 @@ Flush-ToRelay "Step 2 done"
 Write-Log "[3/4] Installing dependencies..." -Color Yellow
 if (-not (Test-Path $REQUIREMENTS_FILE)) { Exit-WithError "$REQUIREMENTS_FILE not found!" }
 
-Write-Log "  Upgrading pip..." -Color Gray
-& $venvPython -m pip install --upgrade pip --quiet
-
-Write-Log "  Installing packages..." -Color Gray
-& $venvPip install -r $REQUIREMENTS_FILE
-if ($LASTEXITCODE -ne 0) { Exit-WithError "pip install failed (exit $LASTEXITCODE)." }
-Write-Log "  All dependencies installed!" -Color Green
+if (-not $venvCreated) {
+    Write-Log "  Venv reused - skipping pip install." -Color Green
+    Write-Log "  (use -Clean to force full reinstall)" -Color Gray
+} else {
+    Write-Log "  Upgrading pip..." -Color Gray
+    & $venvPython -m pip install --upgrade pip --quiet
+    Write-Log "  Installing packages..." -Color Gray
+    & $venvPip install -r $REQUIREMENTS_FILE
+    if ($LASTEXITCODE -ne 0) { Exit-WithError "pip install failed (exit $LASTEXITCODE)." }
+    Write-Log "  All dependencies installed!" -Color Green
+}
 Write-Log ""
 Flush-ToRelay "Step 3 done"
+
 
 # =============================================================================
 # Step 4 - Launch
