@@ -1,6 +1,15 @@
 <#
 .SYNOPSIS  Setup and run Causality Model - installs Python via Miniconda3 (no msiexec, no admin).
+.PARAMETER Clean
+    Si specifie, supprime l'installation Python et le venv existants avant de recommencer.
+    Par defaut (sans cet argument), l'installation existante est reutilisee.
+Usage:
+    launch.bat           -> reutilise l'installation existante
+    launch.bat -Clean    -> reinstalle tout depuis zero
 #>
+param(
+    [switch]$Clean
+)
 
 $PYTHON_VERSION    = "3.11"
 $VENV_DIR          = ".venv"
@@ -69,20 +78,32 @@ Write-Log ""
 Write-Log "========================================" -Color Cyan
 Write-Log "  Causality Model - Setup & Launch"      -Color Cyan
 Write-Log "========================================" -Color Cyan
+if ($Clean) {
+    Write-Log "  Mode: REINSTALL COMPLET (-Clean)"   -Color Yellow
+} else {
+    Write-Log "  Mode: reutilisation existante        " -Color Green
+    Write-Log "  (lancez avec -Clean pour reinstaller)" -Color Gray
+}
 Write-Log ""
 
 # =============================================================================
-# Step 0 - Clean
+# Step 0 - Clean (seulement si -Clean est passe)
 # =============================================================================
-Write-Log "[0/4] Cleaning previous installation..." -Color Yellow
-
-foreach ($d in @($pythonDir, $VENV_DIR)) {
-    if (Test-Path $d) {
-        Write-Log "  Removing: $d" -Color Gray
-        Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
-        if (-not (Test-Path $d)) { Write-Log "  Removed." -Color Green }
-        else { Write-Log "  WARNING: could not fully remove $d" -Color Yellow }
+if ($Clean) {
+    Write-Log "[0/4] Cleaning previous installation..." -Color Yellow
+    foreach ($d in @($pythonDir, $VENV_DIR)) {
+        if (Test-Path $d) {
+            Write-Log "  Removing: $d" -Color Gray
+            Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
+            if (-not (Test-Path $d)) { Write-Log "  Removed." -Color Green }
+            else { Write-Log "  WARNING: could not fully remove $d" -Color Yellow }
+        }
     }
+    Write-Log ""
+    Flush-ToRelay "Step 0 done"
+} else {
+    Write-Log "[0/4] Skipping clean (use -Clean to force reinstall)." -Color Gray
+    Write-Log ""
 }
 
 Write-Log ""
