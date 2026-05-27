@@ -19,7 +19,6 @@ __pycache__/
 
 # Python embeddable package (downloaded and extracted by setup_and_run.ps1)
 python_embed/
-python_env/
 python-*.zip
 python-*.exe
 
@@ -28,9 +27,6 @@ python-*.exe
 
 # Python source builds (downloaded by setup_and_run.sh)
 Python-*.tgz
-
-# Local dev scripts
-push.sh
 
 # IDE / Editor
 .vscode/
