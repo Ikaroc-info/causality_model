@@ -1,27 +1,18 @@
 <#
-.SYNOPSIS
-    Setup and run the Causality Model application.
-.DESCRIPTION
-    Installe Python 3.11 via le .exe officiel (chemin user par defaut, sans admin),
-    poll jusqu'a completion reelle, puis cree un venv et lance app.py.
-    Si RELAY_URL est defini, tous les logs sont aussi envoyes en POST.
+.SYNOPSIS  Setup and run Causality Model - installs Python via Miniconda3 (no msiexec, no admin).
 #>
 
-# --- Configuration ---
-$PYTHON_VERSION    = "3.11.9"
+$PYTHON_VERSION    = "3.11"
 $VENV_DIR          = ".venv"
 $REQUIREMENTS_FILE = "requirements.txt"
 $APP_FILE          = "app.py"
-$INSTALLER_NAME    = "python-$PYTHON_VERSION-amd64.exe"
-$INSTALLER_URL     = "https://www.python.org/ftp/python/$PYTHON_VERSION/$INSTALLER_NAME"
+$RELAY_URL         = "http://192.168.1.45:8765/log"
 
-# URL du relay server (laisser vide pour desactiver)
-# Exemple: $RELAY_URL = "http://192.168.1.42:8765/log"
-$RELAY_URL = "http://192.168.1.45:8765/log"
+# Miniconda3 avec Python 3.11 - installeur NSIS, pas de msiexec, pas d'admin requis
+$MINICONDA_URL = "https://repo.anaconda.com/miniconda/Miniconda3-py311_24.11.1-0-Windows-x86_64.exe"
 
-# Python s'installe dans le chemin user par defaut (pas de TargetDir custom)
-# Cela evite le bug ou Lib/ est absent apres install avec TargetDir personnalise
-$pythonDir  = "$env:LOCALAPPDATA\Programs\Python\Python311"
+# Python installe dans le projet (portable, pas de registre)
+$pythonDir  = "$PSScriptRoot\python_env"
 $pythonExe  = "$pythonDir\python.exe"
 $venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
 $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
@@ -85,192 +76,78 @@ Write-Log ""
 # =============================================================================
 Write-Log "[0/4] Cleaning previous installation..." -Color Yellow
 
-# Supprime le Python precedemment installe (chemin user)
-if (Test-Path $pythonDir) {
-    Write-Log "  Removing previous Python dir: $pythonDir" -Color Gray
-    Remove-Item -Recurse -Force $pythonDir -ErrorAction SilentlyContinue
-    if (Test-Path $pythonDir) {
-        Write-Log "  WARNING: could not fully remove Python dir." -Color Yellow
-    } else {
-        Write-Log "  Removed." -Color Green
+foreach ($d in @($pythonDir, $VENV_DIR)) {
+    if (Test-Path $d) {
+        Write-Log "  Removing: $d" -Color Gray
+        Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
+        if (-not (Test-Path $d)) { Write-Log "  Removed." -Color Green }
+        else { Write-Log "  WARNING: could not fully remove $d" -Color Yellow }
     }
 }
 
-# Supprime le venv
-if (Test-Path $VENV_DIR) {
-    Write-Log "  Removing previous .venv..." -Color Gray
-    Remove-Item -Recurse -Force $VENV_DIR -ErrorAction SilentlyContinue
-    if (-not (Test-Path $VENV_DIR)) { Write-Log "  Removed." -Color Green }
-}
-
-# Nettoie les cles de registre Python 3.11 pour eviter que l'installeur
-# entre en mode Modifier/Reparer silencieux (bloquant sans afficher de fenetre).
-Write-Log "  Cleaning Python 3.11 registry entries..." -Color Gray
-
-$pythonCoreKey = "HKCU:\Software\Python\PythonCore"
-if (Test-Path $pythonCoreKey) {
-    Get-ChildItem $pythonCoreKey -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.PSChildName -like "3.11*") {
-            Write-Log "    Removing: $($_.PSChildName)" -Color Gray
-            Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-$uninstallRoot = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-if (Test-Path $uninstallRoot) {
-    Get-ChildItem $uninstallRoot -ErrorAction SilentlyContinue | ForEach-Object {
-        $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
-        if ($props.DisplayName -like "*Python 3.11*") {
-            Write-Log "    Removing uninstall entry: $($props.DisplayName)" -Color Gray
-            Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-Write-Log "  Registry cleaned." -Color Green
 Write-Log ""
 Flush-ToRelay "Step 0 done"
 
 # =============================================================================
-# Step 1 - Install Python 3.11 (chemin user par defaut, sans TargetDir custom)
+# Step 1 - Install Python via Miniconda3
 # =============================================================================
-Write-Log "[1/4] Installing Python $PYTHON_VERSION..." -Color Yellow
+Write-Log "[1/4] Installing Python $PYTHON_VERSION via Miniconda3..." -Color Yellow
+Write-Log "  (Miniconda uses a simple NSIS installer - no msiexec, no admin needed)" -Color Gray
+Write-Log "  Download: ~85 MB" -Color Gray
 
-$instPath = "$env:TEMP\$INSTALLER_NAME"
+$instPath = "$env:TEMP\Miniconda3_py311.exe"
 
 try {
-    Write-Log "  Downloading installer (~25 MB)..." -Color Gray
-    Invoke-WebRequest -Uri $INSTALLER_URL -OutFile $instPath -UseBasicParsing
+    Write-Log "  Downloading Miniconda3..." -Color Gray
+    Invoke-WebRequest -Uri $MINICONDA_URL -OutFile $instPath -UseBasicParsing
     $sizeMB = [math]::Round((Get-Item $instPath).Length / 1MB, 1)
     Write-Log "  Download complete ($sizeMB MB)." -Color Gray
 
-    # /passive = barre de progression visible, mais pas de clic utilisateur requis.
-    # On N'utilise PAS -WindowStyle Hidden car ca bloque SmartScreen et UAC silencieusement.
-    $installArgs = @(
-        "/passive", "/norestart",
-        "InstallAllUsers=0",
-        "PrependPath=0",
-        "Include_test=0",
-        "Include_launcher=0",
-        "Include_doc=0",
-        "Include_tcltk=1"
-    )
-
-    Write-Log "  Starting installer..." -Color Gray
-    Write-Log "  Install dir: $pythonDir" -Color Gray
+    Write-Log "  Installing to: $pythonDir" -Color Gray
     Write-Log "  (Une fenetre de progression va s'ouvrir - c'est normal)" -Color Cyan
-    $proc = Start-Process -FilePath $instPath -ArgumentList $installArgs -Wait -PassThru
+    Flush-ToRelay "Step 1 - installing"
+
+    # /S = silent, /D = chemin absolu SANS guillemets, DERNIER argument (convention NSIS)
+    $proc = Start-Process -FilePath $instPath -ArgumentList "/S", "/D=$pythonDir" -Wait -PassThru
     $exitCode = $proc.ExitCode
     Remove-Item $instPath -ErrorAction SilentlyContinue
     Write-Log "  Installer exit code: $exitCode" -Color Gray
 
     if ($exitCode -ne 0) {
-        Exit-WithError "Installer failed (exit $exitCode). 1602=UAC annule, 1603=erreur fatale, 1618=install en cours."
+        Exit-WithError "Miniconda installer failed (exit $exitCode)."
     }
 
-    # Lire le registre pour trouver le vrai chemin d'installation.
-    # Python ecrit son chemin dans HKCU apres chaque install reussie.
-    Write-Log "  Searching registry for install path (up to 3 min)..." -Color Gray
-    $regInstallPath = "HKCU:\Software\Python\PythonCore\3.11\InstallPath"
-    $timeoutSec = 180
-    $elapsed    = 0
-    $ready      = $false
-
-    while ($elapsed -lt $timeoutSec) {
-        Start-Sleep -Seconds 5
-        $elapsed += 5
-
-        if (Test-Path $regInstallPath) {
-            $foundPath = (Get-ItemProperty $regInstallPath -ErrorAction SilentlyContinue)."(default)"
-            if (-not $foundPath) {
-                $foundPath = (Get-ItemProperty $regInstallPath -ErrorAction SilentlyContinue).ExecutablePath
-                if ($foundPath) { $foundPath = Split-Path $foundPath }
-            }
-            if ($foundPath -and (Test-Path "$foundPath\python.exe")) {
-                $pythonDir = $foundPath.TrimEnd('\')
-                $pythonExe = "$pythonDir\python.exe"
-                Write-Log "  Registry install path: $pythonDir" -Color Green
-                $ready = $true
-                break
-            }
+    if (-not (Test-Path $pythonExe)) {
+        Write-Log "  python.exe not found at: $pythonExe" -Color Red
+        Write-Log "  Contents of python_env:" -Color Gray
+        if (Test-Path $pythonDir) {
+            Get-ChildItem $pythonDir | ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
         }
-
-        if ($elapsed % 15 -eq 0) {
-            Write-Log "  Still waiting for registry... ($elapsed / $timeoutSec s)" -Color Gray
-            Flush-ToRelay "Step 1 - waiting"
-        }
+        Exit-WithError "Python not found after Miniconda install."
     }
 
-    # Fallback: recherche filesystem si registre pas encore mis a jour
-    if (-not $ready) {
-        Write-Log "  Registry not found. Scanning filesystem..." -Color Yellow
-        $searchRoots = @(
-            "$env:LOCALAPPDATA\Programs",
-            "$env:LOCALAPPDATA",
-            "$env:APPDATA\Programs",
-            "C:\Python311",
-            "$env:USERPROFILE\AppData\Local\Programs"
-        )
-        foreach ($root in $searchRoots) {
-            if (-not (Test-Path $root)) { continue }
-            $found = Get-ChildItem -Path $root -Filter "python.exe" -Recurse -Depth 3 `
-                         -ErrorAction SilentlyContinue |
-                     Where-Object { $_.FullName -notlike "*WindowsApps*" -and $_.FullName -notlike "*Scripts*" } |
-                     Select-Object -First 1
-            if ($found) {
-                $pythonDir = $found.DirectoryName
-                $pythonExe = $found.FullName
-                Write-Log "  Found python.exe at: $pythonExe" -Color Yellow
-                $ready = $true
-                break
-            }
-        }
-    }
-
-    if (-not $ready) {
-        # Dernier debug: lister LOCALAPPDATA\Programs pour diagnostic
-        Write-Log "  Contents of $env:LOCALAPPDATA\Programs:" -Color Gray
-        if (Test-Path "$env:LOCALAPPDATA\Programs") {
-            Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue |
-                ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
-        }
-        Write-Log "  HKCU Python registry keys:" -Color Gray
-        if (Test-Path "HKCU:\Software\Python") {
-            Get-ChildItem "HKCU:\Software\Python" -Recurse -ErrorAction SilentlyContinue |
-                ForEach-Object { Write-Log "    $($_.PSPath -replace '.*HKEY_CURRENT_USER\\','')" -Color Gray }
-        }
-        Exit-WithError "Python not found after install. See diagnostic above."
-    }
-
-    # Contenu du dossier final pour debug
-    Write-Log "  Contents of $pythonDir :" -Color Gray
-    Get-ChildItem $pythonDir -ErrorAction SilentlyContinue |
-        ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
-
+    Write-Log "  Contents of python_env:" -Color Gray
+    Get-ChildItem $pythonDir | ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
 
 } catch {
     Remove-Item $instPath -ErrorAction SilentlyContinue
-    Exit-WithError "Installer download or launch failed: $_"
+    Exit-WithError "Download or install failed: $_"
 }
 
-
-# Set PYTHONHOME so Python always finds its stdlib
 $env:PYTHONHOME       = $pythonDir
 $env:PYTHONUTF8       = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-# Verify python + tkinter
 if (Test-PythonOk $pythonExe) {
     $ver = & $pythonExe --version 2>&1
     Write-Log "  Python: $ver" -Color Green
     Write-Log "  tkinter: OK" -Color Green
 } else {
-    $ver  = & $pythonExe --version 2>&1
-    $tkOk = & $pythonExe -c "import tkinter; print('ok')" 2>&1
-    Write-Log "  [DEBUG] ver : $ver"  -Color Gray
-    Write-Log "  [DEBUG] tk  : $tkOk" -Color Gray
-    Exit-WithError "Python or tkinter check failed after install."
+    $ver = & $pythonExe --version 2>&1
+    $tk  = & $pythonExe -c "import tkinter; print('ok')" 2>&1
+    Write-Log "  [DEBUG] ver: $ver" -Color Gray
+    Write-Log "  [DEBUG] tk : $tk"  -Color Gray
+    Exit-WithError "Python or tkinter check failed."
 }
 
 Write-Log ""
@@ -280,7 +157,6 @@ Flush-ToRelay "Step 1 done"
 # Step 2 - Create virtual environment
 # =============================================================================
 Write-Log "[2/4] Setting up virtual environment..." -Color Yellow
-Write-Log "  Creating .venv..." -Color Gray
 & $pythonExe -X utf8 -m venv $VENV_DIR
 if ($LASTEXITCODE -ne 0) { Exit-WithError "venv creation failed (exit $LASTEXITCODE)." }
 if (-not (Test-Path $venvPython)) { Exit-WithError "venv Python not found at $venvPython" }
@@ -297,7 +173,7 @@ if (-not (Test-Path $REQUIREMENTS_FILE)) { Exit-WithError "$REQUIREMENTS_FILE no
 Write-Log "  Upgrading pip..." -Color Gray
 & $venvPython -m pip install --upgrade pip --quiet
 
-Write-Log "  Installing packages (may take a few minutes)..." -Color Gray
+Write-Log "  Installing packages..." -Color Gray
 & $venvPip install -r $REQUIREMENTS_FILE
 if ($LASTEXITCODE -ne 0) { Exit-WithError "pip install failed (exit $LASTEXITCODE)." }
 Write-Log "  All dependencies installed!" -Color Green
@@ -305,10 +181,9 @@ Write-Log ""
 Flush-ToRelay "Step 3 done"
 
 # =============================================================================
-# Step 4 - Launch application
+# Step 4 - Launch
 # =============================================================================
 Write-Log "[4/4] Launching application..." -Color Yellow
-Write-Log "  Running: $venvPython $APP_FILE" -Color Gray
 Write-Log "========================================" -Color Cyan
 Write-Log ""
 Flush-ToRelay "Step 4 - launching"
