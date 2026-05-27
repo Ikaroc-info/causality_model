@@ -1,154 +1,136 @@
 #!/usr/bin/env python3
 """
-relay_server.py - Mini serveur de relay de messages entre machines.
+relay_server.py - Mini serveur HTTP de relay de messages entre machines.
+
 Usage:
-    python relay_server.py [port]   (defaut: 5000)
+    python relay_server.py [--port 8765] [--host 0.0.0.0]
 
 Endpoints:
-    POST /log       body = texte libre  -> stocke et affiche le message
-    GET  /          -> page HTML avec tous les messages recus
-    GET  /messages  -> JSON brut des messages
+    POST /log   body=texte brut   -> stocke et affiche le message
+    GET  /log                     -> retourne tous les messages recus
+    GET  /                        -> page HTML simple avec les messages
+    DELETE /log                   -> vide l'historique
+
+Depuis PowerShell (Windows):
+    Invoke-WebRequest -Uri "http://<IP>:8765/log" -Method POST -Body "mon message"
 """
 
-import sys
+import argparse
 import json
-import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-PORT    = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
-messages = []   # liste de {time, source, text}
+messages = []  # stockage en memoire
 
 
-class Handler(BaseHTTPRequestHandler):
+class RelayHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
-        # Silence the default Apache-style access log
-        pass
+        # Surcharge pour un log plus lisible
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {self.client_address[0]} - {fmt % args}")
 
     # ------------------------------------------------------------------
     def do_POST(self):
-        if self.path != "/log":
-            self._reply(404, "text/plain", b"Not found")
-            return
-
-        length = int(self.headers.get("Content-Length", 0))
-        body   = self.rfile.read(length).decode("utf-8", errors="replace")
-        source = self.headers.get("X-Source", self.client_address[0])
-
-        entry = {
-            "time":   datetime.datetime.now().strftime("%H:%M:%S"),
-            "source": source,
-            "text":   body,
-        }
-        messages.append(entry)
-
-        # Print to console
-        sep = "-" * 60
-        print(f"\n{sep}")
-        print(f"[{entry['time']}] FROM {entry['source']}")
-        print(entry["text"])
-        print(sep)
-        sys.stdout.flush()
-
-        self._reply(200, "text/plain", b"OK")
+        if self.path == "/log":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", errors="replace").strip()
+            entry = {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "from": self.client_address[0], "msg": body}
+            messages.append(entry)
+            print(f"\n{'='*60}")
+            print(f"  [{entry['time']}] FROM {entry['from']}")
+            print(f"  {body}")
+            print(f"{'='*60}\n")
+            self._send(200, "OK\n")
+        else:
+            self._send(404, "Not found\n")
 
     # ------------------------------------------------------------------
     def do_GET(self):
-        if self.path == "/messages":
-            data = json.dumps(messages, ensure_ascii=False, indent=2).encode()
-            self._reply(200, "application/json", data)
-
-        elif self.path == "/":
-            self._reply(200, "text/html; charset=utf-8", self._build_html())
-
+        if self.path in ("/log", "/log/"):
+            payload = json.dumps(messages, ensure_ascii=False, indent=2)
+            self._send(200, payload, content_type="application/json; charset=utf-8")
+        elif self.path in ("/", "/index.html"):
+            html = self._build_html()
+            self._send(200, html, content_type="text/html; charset=utf-8")
         else:
-            self._reply(404, "text/plain", b"Not found")
+            self._send(404, "Not found\n")
 
     # ------------------------------------------------------------------
-    def _reply(self, code, ctype, body: bytes):
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    def do_DELETE(self):
+        if self.path == "/log":
+            messages.clear()
+            self._send(200, "Cleared\n")
+        else:
+            self._send(404, "Not found\n")
 
-    def _build_html(self) -> bytes:
+    # ------------------------------------------------------------------
+    def _send(self, code, body, content_type="text/plain; charset=utf-8"):
+        data = body.encode("utf-8") if isinstance(body, str) else body
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _build_html(self):
         rows = ""
         for m in reversed(messages):
-            text_escaped = (m["text"]
-                            .replace("&", "&amp;")
-                            .replace("<", "&lt;")
-                            .replace(">", "&gt;"))
-            rows += f"""
-            <tr>
-              <td style="white-space:nowrap;color:#888">{m['time']}</td>
-              <td style="white-space:nowrap;color:#aaa;padding:0 12px">{m['source']}</td>
-              <td><pre style="margin:0;white-space:pre-wrap">{text_escaped}</pre></td>
-            </tr>"""
-
+            msg_escaped = m["msg"].replace("&", "&amp;").replace("<", "&lt;").replace("\n", "<br>")
+            rows += f"<tr><td>{m['time']}</td><td>{m['from']}</td><td><pre>{msg_escaped}</pre></td></tr>"
         if not rows:
-            rows = '<tr><td colspan="3" style="color:#666;text-align:center;padding:32px">Aucun message recu.</td></tr>'
-
-        html = f"""<!DOCTYPE html>
+            rows = "<tr><td colspan='3' style='text-align:center;color:#888'>Aucun message</td></tr>"
+        return f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="refresh" content="3">
+  <meta http-equiv="refresh" content="5">
   <title>Relay Server</title>
   <style>
-    body  {{ background:#1a1a2e; color:#e0e0e0; font-family:monospace; padding:24px; margin:0 }}
-    h1    {{ color:#00d4ff; margin-bottom:4px }}
-    p     {{ color:#888; margin-bottom:20px; font-size:13px }}
-    table {{ width:100%; border-collapse:collapse }}
-    tr    {{ border-bottom:1px solid #2a2a4a }}
-    tr:hover {{ background:#252545 }}
-    td    {{ padding:8px 4px; vertical-align:top; font-size:13px }}
-    pre   {{ font-family:monospace; color:#f0f0f0 }}
+    body {{ font-family: monospace; background:#111; color:#eee; padding:20px; }}
+    h1 {{ color:#4af; }}
+    table {{ width:100%; border-collapse:collapse; }}
+    th {{ background:#222; padding:8px; text-align:left; color:#4af; }}
+    td {{ padding:8px; border-bottom:1px solid #333; vertical-align:top; }}
+    pre {{ margin:0; white-space:pre-wrap; color:#fa4; }}
+    .clear {{ margin-top:10px; }}
+    button {{ background:#a33; color:#fff; border:none; padding:6px 14px; cursor:pointer; border-radius:4px; }}
   </style>
 </head>
 <body>
-  <h1>Relay Server</h1>
-  <p>Port {PORT} &nbsp;|&nbsp; {len(messages)} message(s) &nbsp;|&nbsp; Rafraichissement auto toutes les 3s</p>
+  <h1>Relay Server <small style="font-size:.6em;color:#888">rafraichissement auto 5s</small></h1>
+  <p>{len(messages)} message(s) recus &mdash;
+     <a href="/log" style="color:#4af">JSON brut</a></p>
+  <form class="clear" action="/log" method="post"
+        onsubmit="fetch('/log',{{method:'DELETE'}});location.reload();return false;">
+    <button type="submit">Vider l'historique</button>
+  </form>
+  <br>
   <table>
-    <thead>
-      <tr style="color:#00d4ff">
-        <th style="text-align:left;padding:4px">Heure</th>
-        <th style="text-align:left;padding:4px">Source</th>
-        <th style="text-align:left;padding:4px">Message</th>
-      </tr>
-    </thead>
-    <tbody>{rows}</tbody>
+    <tr><th>Heure</th><th>Depuis</th><th>Message</th></tr>
+    {rows}
   </table>
 </body>
 </html>"""
-        return html.encode("utf-8")
 
 
-if __name__ == "__main__":
-    import socket
+def main():
+    parser = argparse.ArgumentParser(description="Relay server")
+    parser.add_argument("--host", default="0.0.0.0", help="Adresse d'ecoute (defaut: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8765, help="Port (defaut: 8765)")
+    args = parser.parse_args()
 
-    # Get the real outgoing network IP (not 127.0.0.1)
-    # This opens a UDP socket without sending anything, just to get the local IP.
-    def get_local_ip():
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
-
-    local_ip = get_local_ip()
-
-    print(f"Relay Server starting on port {PORT}")
-    print(f"  Local  : http://localhost:{PORT}/")
-    print(f"  Reseau : http://{local_ip}:{PORT}/")
-    print(f"  POST   : http://{local_ip}:{PORT}/log")
-    print("Ctrl+C pour arreter\n")
-
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    server = HTTPServer((args.host, args.port), RelayHandler)
+    print(f"Relay server en ecoute sur http://{args.host}:{args.port}")
+    print(f"  POST /log   <- envoyer un message")
+    print(f"  GET  /      <- interface HTML (auto-refresh 5s)")
+    print(f"  GET  /log   <- historique JSON")
+    print(f"  Ctrl+C pour arreter\n")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nServeur arrete.")
+        print("\nArret.")
+
+
+if __name__ == "__main__":
+    main()
