@@ -169,64 +169,85 @@ try {
         Exit-WithError "Installer failed (exit $exitCode). 1602=UAC annule, 1603=erreur fatale, 1618=install en cours."
     }
 
-
-    # Poll jusqu'a ce que Lib\os.py apparaisse.
-    # Le bootstrapper quitte immediatement apres avoir lance msiexec en fond.
-    # -Wait attend le bootstrapper seulement, pas ses enfants. D'ou le poll long.
-    Write-Log "  Waiting for Lib\os.py (up to 5 min)..." -Color Gray
-    $timeoutSec = 300
+    # Lire le registre pour trouver le vrai chemin d'installation.
+    # Python ecrit son chemin dans HKCU apres chaque install reussie.
+    Write-Log "  Searching registry for install path (up to 3 min)..." -Color Gray
+    $regInstallPath = "HKCU:\Software\Python\PythonCore\3.11\InstallPath"
+    $timeoutSec = 180
     $elapsed    = 0
     $ready      = $false
+
     while ($elapsed -lt $timeoutSec) {
         Start-Sleep -Seconds 5
         $elapsed += 5
-        if (Test-Path "$pythonDir\Lib\os.py") {
-            $ready = $true
-            Write-Log "  Lib\os.py found! ($elapsed s)" -Color Green
-            break
+
+        if (Test-Path $regInstallPath) {
+            $foundPath = (Get-ItemProperty $regInstallPath -ErrorAction SilentlyContinue)."(default)"
+            if (-not $foundPath) {
+                $foundPath = (Get-ItemProperty $regInstallPath -ErrorAction SilentlyContinue).ExecutablePath
+                if ($foundPath) { $foundPath = Split-Path $foundPath }
+            }
+            if ($foundPath -and (Test-Path "$foundPath\python.exe")) {
+                $pythonDir = $foundPath.TrimEnd('\')
+                $pythonExe = "$pythonDir\python.exe"
+                Write-Log "  Registry install path: $pythonDir" -Color Green
+                $ready = $true
+                break
+            }
         }
+
         if ($elapsed % 15 -eq 0) {
-            Write-Log "  Still waiting... ($elapsed / $timeoutSec s)" -Color Gray
+            Write-Log "  Still waiting for registry... ($elapsed / $timeoutSec s)" -Color Gray
             Flush-ToRelay "Step 1 - waiting"
         }
     }
 
-    # Si introuvable au chemin attendu, chercher python.exe ailleurs dans LocalAppData
+    # Fallback: recherche filesystem si registre pas encore mis a jour
     if (-not $ready) {
-        Write-Log "  Lib\os.py not found at expected path. Searching LocalAppData..." -Color Yellow
+        Write-Log "  Registry not found. Scanning filesystem..." -Color Yellow
+        $searchRoots = @(
+            "$env:LOCALAPPDATA\Programs",
+            "$env:LOCALAPPDATA",
+            "$env:APPDATA\Programs",
+            "C:\Python311",
+            "$env:USERPROFILE\AppData\Local\Programs"
+        )
+        foreach ($root in $searchRoots) {
+            if (-not (Test-Path $root)) { continue }
+            $found = Get-ChildItem -Path $root -Filter "python.exe" -Recurse -Depth 3 `
+                         -ErrorAction SilentlyContinue |
+                     Where-Object { $_.FullName -notlike "*WindowsApps*" -and $_.FullName -notlike "*Scripts*" } |
+                     Select-Object -First 1
+            if ($found) {
+                $pythonDir = $found.DirectoryName
+                $pythonExe = $found.FullName
+                Write-Log "  Found python.exe at: $pythonExe" -Color Yellow
+                $ready = $true
+                break
+            }
+        }
+    }
+
+    if (-not $ready) {
+        # Dernier debug: lister LOCALAPPDATA\Programs pour diagnostic
         Write-Log "  Contents of $env:LOCALAPPDATA\Programs:" -Color Gray
         if (Test-Path "$env:LOCALAPPDATA\Programs") {
             Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue |
                 ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
         }
-        $foundExe = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs" -Filter "python.exe" `
-                        -Recurse -ErrorAction SilentlyContinue |
-                    Where-Object { $_.FullName -notlike "*WindowsApps*" -and $_.FullName -notlike "*Scripts*" } |
-                    Select-Object -First 1
-        if ($foundExe) {
-            Write-Log "  Found python.exe at: $($foundExe.FullName)" -Color Yellow
-            $script:pythonDir = $foundExe.DirectoryName
-            $script:pythonExe = $foundExe.FullName
-            if (Test-Path "$($foundExe.DirectoryName)\Lib\os.py") {
-                Write-Log "  Lib\os.py confirmed at alternate path!" -Color Green
-                $ready = $true
-            } else {
-                Write-Log "  WARNING: python.exe found but Lib\os.py still missing at $($foundExe.DirectoryName)" -Color Yellow
-            }
-        } else {
-            Write-Log "  No python.exe found anywhere in LocalAppData\Programs." -Color Red
+        Write-Log "  HKCU Python registry keys:" -Color Gray
+        if (Test-Path "HKCU:\Software\Python") {
+            Get-ChildItem "HKCU:\Software\Python" -Recurse -ErrorAction SilentlyContinue |
+                ForEach-Object { Write-Log "    $($_.PSPath -replace '.*HKEY_CURRENT_USER\\','')" -Color Gray }
         }
+        Exit-WithError "Python not found after install. See diagnostic above."
     }
 
-    if (-not $ready) {
-        Exit-WithError "Python install completed but Lib\os.py not found. Check above for alternate paths."
-    }
-
-    # Contenu du dossier pour debug
+    # Contenu du dossier final pour debug
     Write-Log "  Contents of $pythonDir :" -Color Gray
-    if (Test-Path $pythonDir) {
-        Get-ChildItem $pythonDir | ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
-    }
+    Get-ChildItem $pythonDir -ErrorAction SilentlyContinue |
+        ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
+
 
 } catch {
     Remove-Item $instPath -ErrorAction SilentlyContinue
