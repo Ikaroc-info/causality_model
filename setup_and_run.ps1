@@ -145,11 +145,10 @@ try {
     $sizeMB = [math]::Round((Get-Item $instPath).Length / 1MB, 1)
     Write-Log "  Download complete ($sizeMB MB)." -Color Gray
 
-    # Installer sans TargetDir custom = chemin par defaut qui fonctionne correctement.
-    # Include_tcltk=1 garantit tkinter.
-    # On NE PAS mettre de TargetDir ici — c'est ce qui causait l'absence de Lib/.
+    # /passive = barre de progression visible, mais pas de clic utilisateur requis.
+    # On N'utilise PAS -WindowStyle Hidden car ca bloque SmartScreen et UAC silencieusement.
     $installArgs = @(
-        "/quiet", "/norestart",
+        "/passive", "/norestart",
         "InstallAllUsers=0",
         "PrependPath=0",
         "Include_test=0",
@@ -158,9 +157,9 @@ try {
         "Include_tcltk=1"
     )
 
-    Write-Log "  Starting installer (silent, user install)..." -Color Gray
+    Write-Log "  Starting installer..." -Color Gray
     Write-Log "  Install dir: $pythonDir" -Color Gray
-    # -Wait: attend que le bootstrapper ET ses enfants msiexec terminent
+    Write-Log "  (Une fenetre de progression va s'ouvrir - c'est normal)" -Color Cyan
     $proc = Start-Process -FilePath $instPath -ArgumentList $installArgs -Wait -PassThru
     $exitCode = $proc.ExitCode
     Remove-Item $instPath -ErrorAction SilentlyContinue
@@ -169,6 +168,7 @@ try {
     if ($exitCode -ne 0) {
         Exit-WithError "Installer failed (exit $exitCode). 1602=UAC annule, 1603=erreur fatale, 1618=install en cours."
     }
+
 
     # Poll jusqu'a ce que Lib\os.py apparaisse.
     # Le bootstrapper quitte immediatement apres avoir lance msiexec en fond.
