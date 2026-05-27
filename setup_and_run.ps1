@@ -112,16 +112,16 @@ Flush-ToRelay "Step 0 done"
 # =============================================================================
 # Step 1 - Install Python via Miniconda3 (si necessaire)
 # =============================================================================
-Write-Log "[1/4] Checking Python $PYTHON_VERSION..." -Color Yellow
+Write-Log "[1/4] Checking Miniconda at: $pythonDir" -Color Yellow
 
 if (Test-PythonOk $pythonExe) {
     $ver = & $pythonExe --version 2>&1
-    Write-Log "  Python already installed and working: $ver" -Color Green
+    Write-Log "  Miniconda already installed and working: $ver" -Color Green
     Write-Log "  tkinter: OK" -Color Green
-    Write-Log "  Skipping Miniconda install." -Color Gray
+    Write-Log "  Skipping install." -Color Gray
 } else {
-    Write-Log "  Python not found or broken. Installing via Miniconda3..." -Color Yellow
-    Write-Log "  (Miniconda uses a simple NSIS installer - no msiexec, no admin needed)" -Color Gray
+    Write-Log "  Not found or broken at: $pythonDir" -Color Yellow
+    Write-Log "  Installing Miniconda3 (NSIS installer, no msiexec, no admin needed)..." -Color Yellow
     Write-Log "  Download: ~85 MB" -Color Gray
 
 
