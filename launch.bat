@@ -1,6 +1,8 @@
 @echo off
 :: Causality Model - Launcher
 :: Double-cliquez sur ce fichier pour lancer l'application.
-:: Il appelle setup_and_run.ps1 en contournant la politique d'execution PowerShell.
 
+:: Se placer dans le repertoire du .bat avant de lancer PowerShell
+:: pour que $PSScriptRoot soit correct dans le script.
+cd /d "%~dp0"
 PowerShell -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup_and_run.ps1"

@@ -11,8 +11,8 @@ $RELAY_URL         = "http://192.168.1.45:8765/log"
 # Miniconda3 avec Python 3.11 - installeur NSIS, pas de msiexec, pas d'admin requis
 $MINICONDA_URL = "https://repo.anaconda.com/miniconda/Miniconda3-py311_24.11.1-0-Windows-x86_64.exe"
 
-# Python installe dans le projet (portable, pas de registre)
-$pythonDir  = "$PSScriptRoot\python_env"
+# Chemin fixe dans USERPROFILE (independant de PSScriptRoot, toujours accessible en ecriture)
+$pythonDir  = "$env:USERPROFILE\miniconda_causality"
 $pythonExe  = "$pythonDir\python.exe"
 $venvPython = "$PSScriptRoot\$VENV_DIR\Scripts\python.exe"
 $venvPip    = "$PSScriptRoot\$VENV_DIR\Scripts\pip.exe"
@@ -107,8 +107,14 @@ try {
     Write-Log "  (Une fenetre de progression va s'ouvrir - c'est normal)" -Color Cyan
     Flush-ToRelay "Step 1 - installing"
 
-    # /S = silent, /D = chemin absolu SANS guillemets, DERNIER argument (convention NSIS)
-    $proc = Start-Process -FilePath $instPath -ArgumentList "/S", "/D=$pythonDir" -Wait -PassThru
+    # Flags requis pour install user-space sans admin:
+    # /InstallationType=JustMe = install pour l'utilisateur courant seulement
+    # /RegisterPython=0        = ne pas modifier le registre systeme
+    # /S                       = silent
+    # /D=<path>                = doit etre le DERNIER argument, sans guillemets (convention NSIS)
+    $proc = Start-Process -FilePath $instPath `
+        -ArgumentList "/InstallationType=JustMe", "/RegisterPython=0", "/S", "/D=$pythonDir" `
+        -Wait -PassThru
     $exitCode = $proc.ExitCode
     Remove-Item $instPath -ErrorAction SilentlyContinue
     Write-Log "  Installer exit code: $exitCode" -Color Gray
