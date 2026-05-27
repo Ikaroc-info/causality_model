@@ -29,6 +29,9 @@ python-*.exe
 # Python source builds (downloaded by setup_and_run.sh)
 Python-*.tgz
 
+# Local dev scripts
+push.sh
+
 # IDE / Editor
 .vscode/
 .idea/
