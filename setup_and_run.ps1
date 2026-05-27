@@ -170,33 +170,69 @@ try {
         Exit-WithError "Installer failed (exit $exitCode). 1602=UAC annule, 1603=erreur fatale, 1618=install en cours."
     }
 
-    # Poll court pour attendre les eventuels msiexec enfants restants
-    Write-Log "  Waiting for Lib\os.py..." -Color Gray
-    $timeoutSec = 60
+    # Poll jusqu'a ce que Lib\os.py apparaisse.
+    # Le bootstrapper quitte immediatement apres avoir lance msiexec en fond.
+    # -Wait attend le bootstrapper seulement, pas ses enfants. D'ou le poll long.
+    Write-Log "  Waiting for Lib\os.py (up to 5 min)..." -Color Gray
+    $timeoutSec = 300
     $elapsed    = 0
     $ready      = $false
     while ($elapsed -lt $timeoutSec) {
-        Start-Sleep -Seconds 3
-        $elapsed += 3
+        Start-Sleep -Seconds 5
+        $elapsed += 5
         if (Test-Path "$pythonDir\Lib\os.py") {
             $ready = $true
             Write-Log "  Lib\os.py found! ($elapsed s)" -Color Green
             break
         }
+        if ($elapsed % 15 -eq 0) {
+            Write-Log "  Still waiting... ($elapsed / $timeoutSec s)" -Color Gray
+            Flush-ToRelay "Step 1 - waiting"
+        }
+    }
+
+    # Si introuvable au chemin attendu, chercher python.exe ailleurs dans LocalAppData
+    if (-not $ready) {
+        Write-Log "  Lib\os.py not found at expected path. Searching LocalAppData..." -Color Yellow
+        Write-Log "  Contents of $env:LOCALAPPDATA\Programs:" -Color Gray
+        if (Test-Path "$env:LOCALAPPDATA\Programs") {
+            Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue |
+                ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
+        }
+        $foundExe = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs" -Filter "python.exe" `
+                        -Recurse -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -notlike "*WindowsApps*" -and $_.FullName -notlike "*Scripts*" } |
+                    Select-Object -First 1
+        if ($foundExe) {
+            Write-Log "  Found python.exe at: $($foundExe.FullName)" -Color Yellow
+            $script:pythonDir = $foundExe.DirectoryName
+            $script:pythonExe = $foundExe.FullName
+            if (Test-Path "$($foundExe.DirectoryName)\Lib\os.py") {
+                Write-Log "  Lib\os.py confirmed at alternate path!" -Color Green
+                $ready = $true
+            } else {
+                Write-Log "  WARNING: python.exe found but Lib\os.py still missing at $($foundExe.DirectoryName)" -Color Yellow
+            }
+        } else {
+            Write-Log "  No python.exe found anywhere in LocalAppData\Programs." -Color Red
+        }
     }
 
     if (-not $ready) {
-        Exit-WithError "Timeout: Lib\os.py not found after $timeoutSec s. Installation may have failed."
+        Exit-WithError "Python install completed but Lib\os.py not found. Check above for alternate paths."
     }
 
     # Contenu du dossier pour debug
     Write-Log "  Contents of $pythonDir :" -Color Gray
-    Get-ChildItem $pythonDir | ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
+    if (Test-Path $pythonDir) {
+        Get-ChildItem $pythonDir | ForEach-Object { Write-Log "    $($_.Name)" -Color Gray }
+    }
 
 } catch {
     Remove-Item $instPath -ErrorAction SilentlyContinue
     Exit-WithError "Installer download or launch failed: $_"
 }
+
 
 # Set PYTHONHOME so Python always finds its stdlib
 $env:PYTHONHOME       = $pythonDir
